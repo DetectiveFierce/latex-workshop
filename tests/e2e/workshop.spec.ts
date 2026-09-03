@@ -417,6 +417,7 @@ test('library organizes projects with folders, tags, views, bulk actions, and re
     .getByRole('toolbar', { name: 'Selected project actions' })
     .getByRole('button', { name: 'Favorite' })
     .click();
+  await expect(page.getByText('Project updated', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Favorites', exact: true }).click();
   await expect(page.getByText('Folder Paper')).toBeVisible();
 

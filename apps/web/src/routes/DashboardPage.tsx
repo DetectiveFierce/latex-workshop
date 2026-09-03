@@ -315,8 +315,8 @@ export function DashboardPage() {
         method: 'POST',
         body: JSON.stringify(input),
       }),
-    onMutate: (input) => {
-      void queryClient.cancelQueries({ queryKey: queryKeys.library(trash) });
+    onMutate: async (input) => {
+      await queryClient.cancelQueries({ queryKey: queryKeys.library(trash) });
       const previous = queryClient.getQueryData<LibraryResponse>(queryKeys.library(trash));
       if (previous) {
         const ids = new Set(input.projectIds as string[]);
@@ -381,8 +381,8 @@ export function DashboardPage() {
           tagIds: [input.tagId],
         }),
       }),
-    onMutate: (input) => {
-      void queryClient.cancelQueries({ queryKey: queryKeys.library(trash) });
+    onMutate: async (input) => {
+      await queryClient.cancelQueries({ queryKey: queryKeys.library(trash) });
       queryClient.setQueryData<LibraryResponse>(queryKeys.library(trash), (current) => {
         if (!current) return current;
         const ids = new Set(input.projectIds);
