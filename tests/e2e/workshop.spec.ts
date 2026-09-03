@@ -408,6 +408,7 @@ test('library organizes projects with folders, tags, views, bulk actions, and re
     .click();
   await page.getByRole('treeitem', { name: '2026' }).click();
   await page.getByRole('button', { name: 'Move', exact: true }).click();
+  await expect(page.getByText('Project moved', { exact: true })).toBeVisible();
   await expect(page.getByText('Folder Paper')).toHaveCount(0);
 
   await page.locator('.folder-tile').getByRole('button', { name: '2026', exact: true }).click();
