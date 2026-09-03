@@ -1,0 +1,26 @@
+\pdfinfoomitdate=1
+\pdftrailerid{}
+\documentclass{article}
+\usepackage{amsmath}
+\pagestyle{empty}
+\begin{document}
+Plain source text for forward and inverse synchronization.
+
+\newpage
+\pdfpageattr{/CropBox [18 24 594 768]}
+\textbf{Printable macro argument}
+\[
+\begin{aligned}
+  x &= y + 1 \\
+  z &= x^2
+\end{aligned}
+\]
+
+\newpage
+\pdfpageattr{/CropBox [18 24 594 768] /Rotate 90}
+This page has a non-default crop box, origin, and rotation.
+
+\newpage
+\pdfpageattr{}
+Multipage synchronization reaches an ordinary final page.
+\end{document}

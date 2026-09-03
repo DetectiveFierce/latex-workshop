@@ -1,0 +1,118 @@
+:root {
+  color-scheme: dark;
+  --hon-terminal: #0d1303;
+  --hon-app: #172304;
+  --hon-editor: #1a2d00;
+  --hon-surface: #293911;
+  --hon-surface-hover: #2e4012;
+  --hon-active: #3a5412;
+  --hon-active-strong: #4a6b1a;
+  --hon-border: #3d5614;
+  --hon-guide: #4a5238;
+  --hon-text: #92b161;
+  --hon-text-bright: #c5dca3;
+  --hon-muted: #7a9a4a;
+  --hon-disabled: #5a6e38;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --hon-green: #a6e22e;
+  --hon-cyan: #66d9ef;
+  --hon-blue: #819aff;
+  --hon-yellow: #e6db74;
+  --hon-orange: #fd971f;
+  --hon-magenta: #ae81ff;
+  --hon-red: #f92672;
+  --hon-danger-dark: #5a1230;
+  --hon-success-dark: #27400e;
+  --shadow: 0 18px 60px #070b02aa;
+  --radius: 8px;
+  --radius-lg: 14px;
+  --ui-font-scale: 1;
+  font-family:
+    Inter,
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    'Segoe UI',
+    sans-serif;
+  color: var(--hon-text);
+  background: var(--hon-app);
+  font-synthesis: none;
+}
+
+* {
+  box-sizing: border-box;
+}
+html,
+body,
+#root {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+}
+@supports (height: 100dvh) {
+  html,
+  body,
+  #root {
+    height: 100dvh;
+  }
+}
+body {
+  min-width: 320px;
+  background: var(--hon-app);
+  overflow: hidden;
+  overscroll-behavior: none;
+  font-size: calc(16px * var(--ui-font-scale));
+}
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+button,
+a {
+  -webkit-tap-highlight-color: transparent;
+}
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid var(--hon-green);
+  outline-offset: 2px;
+}
+::selection {
+  color: #fff;
+  background: #3a6bff80;
+}
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: var(--hon-editor);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--hon-active);
+  border: 2px solid var(--hon-editor);
+  border-radius: 10px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--hon-active-strong);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}

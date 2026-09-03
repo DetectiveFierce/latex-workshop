@@ -1,0 +1,2 @@
+DROP INDEX "entries_sibling_name_idx";--> statement-breakpoint
+CREATE UNIQUE INDEX "entries_sibling_name_idx" ON "entries" USING btree ("project_id",coalesce("parent_id", '00000000-0000-0000-0000-000000000000'::uuid),lower("name"));

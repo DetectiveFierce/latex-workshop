@@ -1,0 +1,1 @@
+ALTER TABLE "editor_history_nodes" ADD COLUMN "session_id" text;

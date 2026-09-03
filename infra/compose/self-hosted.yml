@@ -1,0 +1,329 @@
+name: latex-workshop
+
+x-runtime-env: &runtime-env
+  NODE_ENV: production
+  WEB_ORIGIN: ${WEB_ORIGIN:?set WEB_ORIGIN}
+  API_ORIGIN: ${API_ORIGIN:?set API_ORIGIN}
+  API_PORT: 3001
+  LSP_PORT: 3002
+  DATABASE_URL: postgres://${POSTGRES_USER:?set POSTGRES_USER}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:?set POSTGRES_DB}
+  REDIS_URL: redis://redis:6379
+  S3_ENDPOINT: http://minio:9000
+  S3_PUBLIC_ENDPOINT: ${S3_PUBLIC_ENDPOINT:?set S3_PUBLIC_ENDPOINT}
+  S3_REGION: us-east-1
+  S3_BUCKET: latex-workshop
+  S3_ACCESS_KEY: ${S3_ACCESS_KEY:?set S3_ACCESS_KEY}
+  S3_SECRET_KEY: ${S3_SECRET_KEY:?set S3_SECRET_KEY}
+  S3_FORCE_PATH_STYLE: 'true'
+  AUTH_SECRET: ${AUTH_SECRET:?set AUTH_SECRET}
+  SMTP_HOST: mailpit
+  SMTP_PORT: 1025
+  SMTP_FROM: ${SMTP_FROM:-LaTeX Workshop <noreply@latex-workshop.local>}
+  COMPILE_IMAGE: ${TEXLIVE_IMAGE:?set TEXLIVE_IMAGE}
+  COMPILE_TIMEOUT_MS: ${COMPILE_TIMEOUT_MS:-60000}
+  MAX_PROJECTS_PER_USER: ${MAX_PROJECTS_PER_USER:-250}
+  MAX_USER_BYTES: ${MAX_USER_BYTES:-1073741824}
+  MAX_PROJECT_BYTES: ${MAX_PROJECT_BYTES:-262144000}
+  MAX_FILE_BYTES: ${MAX_FILE_BYTES:-52428800}
+  SESSION_IDLE_MS: ${SESSION_IDLE_MS:-900000}
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: 10m
+    max-file: '3'
+
+x-app-security: &app-security
+  user: '10001:10001'
+  read_only: true
+  tmpfs:
+    - /tmp:rw,noexec,nosuid,size=256m,uid=10001,gid=10001
+  cap_drop: [ALL]
+  security_opt: [no-new-privileges:true]
+
+services:
+  postgres:
+    image: postgres:17-alpine@sha256:18cfe3ef5e6815560c98237d6216d1e5119702fb0f3894c8785dd58b8bbe5d73
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?set POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:?set POSTGRES_DB}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: [CMD-SHELL, 'pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"']
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    networks: [backend]
+    logging: *default-logging
+
+  redis:
+    image: redis:8-alpine@sha256:becdda6c7f4b3fb42e42fd7f120bbf5c54c4caaaf16f26da24e4563d2c1f0576
+    command: [redis-server, --appendonly, 'yes']
+    restart: unless-stopped
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: [CMD, redis-cli, ping]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    networks: [backend]
+    logging: *default-logging
+
+  minio:
+    image: quay.io/minio/minio:latest@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
+    command: [server, /data, --console-address, ':9001']
+    restart: unless-stopped
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?set MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD}
+      MINIO_API_CORS_ALLOW_ORIGIN: ${WEB_ORIGIN:?set WEB_ORIGIN}
+      MINIO_BROWSER_REDIRECT_URL: ${MINIO_BROWSER_REDIRECT_URL:-https://mind-palace/minio/ui}
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: [CMD, curl, -fsS, http://localhost:9000/minio/health/live]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    networks:
+      backend: {}
+      edge:
+        aliases: [latex-workshop-minio]
+    logging: *default-logging
+
+  minio-init:
+    image: minio/mc@sha256:eb4ea9884b77704230e2423e9004d2fa738dc272876b9cc41a297d29443b8780
+    restart: 'no'
+    depends_on:
+      minio:
+        condition: service_healthy
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?set MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD}
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY:?set S3_ACCESS_KEY}
+      S3_SECRET_KEY: ${S3_SECRET_KEY:?set S3_SECRET_KEY}
+    entrypoint: [/bin/sh, -ec]
+    command:
+      - |
+        mc alias set local http://minio:9000 "$${MINIO_ROOT_USER}" "$${MINIO_ROOT_PASSWORD}"
+        mc mb --ignore-existing local/latex-workshop
+        mc version enable local/latex-workshop
+        mc admin user add local "$${S3_ACCESS_KEY}" "$${S3_SECRET_KEY}"
+        mc admin policy create local latex-workshop /config/minio-latex-policy.json
+        mc admin policy attach local latex-workshop --user "$${S3_ACCESS_KEY}"
+    volumes:
+      - ./minio-latex-policy.json:/config/minio-latex-policy.json:ro
+    networks: [backend]
+    logging: *default-logging
+
+  mailpit:
+    image: axllent/mailpit:v1.27@sha256:e22dce5b36f93c77082e204a3942fb6b283b7896e057458400a4c88344c3df68
+    restart: unless-stopped
+    environment:
+      MP_DATABASE: /data/mailpit.db
+      MP_MAX_AGE: 30d
+      MP_MAX_MESSAGES: 500
+      MP_DISABLE_VERSION_CHECK: 'true'
+      MP_WEBROOT: /mailpit/
+    volumes:
+      - mailpit-data:/data
+    healthcheck:
+      test: [CMD, /mailpit, readyz]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    networks:
+      backend: {}
+      edge:
+        aliases: [latex-workshop-mailpit]
+    logging: *default-logging
+
+  texlive-image:
+    image: ${TEXLIVE_IMAGE:?set TEXLIVE_IMAGE}
+    build:
+      context: ../..
+      dockerfile: infra/texlive/Dockerfile
+    command: ['true']
+    restart: 'no'
+    networks: [backend]
+    logging: *default-logging
+
+  migrate:
+    image: ${SERVICE_IMAGE:?set SERVICE_IMAGE}
+    build:
+      context: ../..
+      dockerfile: Dockerfile.services
+      target: runtime
+    command: [packages/db/node_modules/.bin/tsx, packages/db/src/migrate.ts]
+    environment: *runtime-env
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks: [backend]
+    restart: 'no'
+    profiles: [tools]
+    logging: *default-logging
+
+  api:
+    <<: *app-security
+    image: ${SERVICE_IMAGE:?set SERVICE_IMAGE}
+    command: [node, apps/api/dist/server.js]
+    environment: *runtime-env
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+      mailpit:
+        condition: service_healthy
+    expose: ['3001']
+    healthcheck:
+      test: [CMD, curl, -fsS, http://localhost:3001/health/ready]
+      interval: 10s
+      timeout: 4s
+      retries: 12
+    stop_grace_period: 30s
+    networks: [backend]
+    logging: *default-logging
+
+  language-service:
+    <<: *app-security
+    image: ${SERVICE_IMAGE:?set SERVICE_IMAGE}
+    command: [node, apps/language-service/dist/index.js]
+    environment: *runtime-env
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+    expose: ['3002']
+    healthcheck:
+      test: [CMD, curl, -fsS, http://localhost:3002/health/ready]
+      interval: 10s
+      timeout: 4s
+      retries: 12
+    stop_grace_period: 30s
+    networks: [backend]
+    logging: *default-logging
+
+  compile-worker:
+    image: ${SERVICE_IMAGE:?set SERVICE_IMAGE}
+    command: [node, apps/compile-worker/dist/index.js]
+    user: '10001:10001'
+    group_add:
+      - ${DOCKER_GID:?set DOCKER_GID}
+    environment:
+      <<: *runtime-env
+      HOME: /tmp
+      TMPDIR: ${COMPILE_WORK_DIR:?set COMPILE_WORK_DIR}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ${COMPILE_WORK_DIR:?set COMPILE_WORK_DIR}:${COMPILE_WORK_DIR:?set COMPILE_WORK_DIR}
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    restart: unless-stopped
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - >-
+          const { createRequire } = require('node:module');
+          const { Redis } = createRequire('/app/apps/compile-worker/package.json')('ioredis');
+          const redis = new Redis(process.env.REDIS_URL, {
+            lazyConnect: true,
+            maxRetriesPerRequest: 1,
+          });
+          const timeout = setTimeout(() => process.exit(1), 3000);
+          redis.connect()
+            .then(() => redis.ping())
+            .then(() => {
+              clearTimeout(timeout);
+              return redis.quit();
+            })
+            .then(() => process.exit(0))
+            .catch(() => process.exit(1));
+      interval: 15s
+      timeout: 5s
+      start_period: 20s
+      retries: 4
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+      texlive-image:
+        condition: service_completed_successfully
+    stop_grace_period: 90s
+    networks: [backend]
+    logging: *default-logging
+
+  web:
+    image: ${WEB_IMAGE:?set WEB_IMAGE}
+    build:
+      context: ../..
+      dockerfile: apps/web/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+      language-service:
+        condition: service_healthy
+    read_only: true
+    tmpfs: [/var/cache/nginx, /var/run]
+    healthcheck:
+      test: [CMD, wget, -qO-, http://127.0.0.1/health/live]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+    networks:
+      backend: {}
+      edge:
+        aliases: [latex-workshop-web]
+    logging: *default-logging
+
+  minio-backup:
+    image: minio/mc@sha256:eb4ea9884b77704230e2423e9004d2fa738dc272876b9cc41a297d29443b8780
+    profiles: [tools]
+    user: '${BACKUP_UID:-1000}:${BACKUP_GID:-1000}'
+    environment:
+      HOME: /tmp
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY:?set S3_ACCESS_KEY}
+      S3_SECRET_KEY: ${S3_SECRET_KEY:?set S3_SECRET_KEY}
+    entrypoint: [/bin/sh, -ec]
+    command:
+      - |
+        mc alias set local http://minio:9000 "$${S3_ACCESS_KEY}" "$${S3_SECRET_KEY}"
+        mc mirror --overwrite local/latex-workshop /backup/objects
+    volumes:
+      - ${BACKUP_STAGE_DIR:?set BACKUP_STAGE_DIR}:/backup
+    networks: [backend]
+    logging: *default-logging
+
+networks:
+  backend:
+    name: latex-workshop-backend
+    internal: true
+  edge:
+    name: mind-palace-edge
+    external: true
+
+volumes:
+  postgres-data:
+    name: latex-workshop-postgres-data
+  redis-data:
+    name: latex-workshop-redis-data
+  minio-data:
+    name: latex-workshop-minio-data
+  mailpit-data:
+    name: latex-workshop-mailpit-data

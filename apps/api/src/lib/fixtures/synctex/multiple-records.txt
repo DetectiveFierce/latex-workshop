@@ -1,0 +1,29 @@
+SyncTeX result begin
+Output:document.pdf
+Page:1
+x:12
+y:24
+h:10
+v:30
+W:40
+H:7
+D:2
+Input:/workspace/main.tex
+Line:9
+Column:3
+Before:intro
+Offset:0
+Middle:word
+After:outro
+Output:document.pdf
+Page:2
+x:2
+y:4
+h:1
+v:5
+W:6
+H:2
+D:1
+Input:/workspace/chapters/included.tex
+Line:18
+SyncTeX result end

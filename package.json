@@ -1,0 +1,39 @@
+{
+  "name": "latex-workshop",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@10.15.0",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "build": "turbo run build",
+    "dev": "turbo run dev --parallel",
+    "lint": "turbo run lint",
+    "test": "turbo run test",
+    "test:e2e": "playwright test",
+    "test:e2e:install": "playwright install --with-deps chromium",
+    "deploy:fast": "infra/self-host/deploy.sh --fast",
+    "deploy:production": "infra/self-host/deploy.sh --production",
+    "deploy:mind-palace": "pnpm deploy:production",
+    "typecheck": "turbo run typecheck",
+    "db:generate": "pnpm --filter @latex-workshop/db generate",
+    "db:migrate": "pnpm --filter @latex-workshop/db migrate",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
+  },
+  "devDependencies": {
+    "@axe-core/playwright": "4.13.0",
+    "@eslint/js": "9.34.0",
+    "@playwright/test": "1.62.1",
+    "@types/node": "24.3.0",
+    "eslint": "9.34.0",
+    "eslint-config-prettier": "10.1.8",
+    "globals": "16.3.0",
+    "prettier": "3.6.2",
+    "turbo": "2.5.6",
+    "typescript": "5.9.2",
+    "typescript-eslint": "8.41.0",
+    "vitest": "3.2.4"
+  }
+}
