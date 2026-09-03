@@ -20,8 +20,12 @@ export function Dialog({
   useEffect(
     () => () => {
       // Radix disables outside pointer events while a modal is open. If navigation
-      // unmounts the route during a dialog submit, restore the document explicitly.
-      document.body.style.removeProperty('pointer-events');
+      // unmounts the route during a dialog submit, its own teardown can run after
+      // this cleanup. Restore interaction once all unmount cleanups have settled.
+      window.setTimeout(() => {
+        document.documentElement.style.removeProperty('pointer-events');
+        document.body.style.removeProperty('pointer-events');
+      }, 0);
     },
     [],
   );

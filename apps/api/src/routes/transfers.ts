@@ -1,8 +1,9 @@
 import { Readable } from 'node:stream';
 import archiver from 'archiver';
-import { eq, sql } from 'drizzle-orm';
+import { and, eq, isNull, sql } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import yauzl from 'yauzl-promise';
+import type { Entry as ZipEntry } from 'yauzl-promise';
 import type { AppConfig } from '@latex-workshop/config';
 import { limits, normalizeArchivePath, type Project } from '@latex-workshop/contracts';
 import {
@@ -12,6 +13,7 @@ import {
   fileVersions,
   projectMemberships,
   projects,
+  userTemplateSeeds,
 } from '@latex-workshop/db';
 import type { AppContext } from '../lib/context.js';
 import { requireUser } from '../lib/context.js';
@@ -38,11 +40,11 @@ export async function readProjectArchive(
   let expanded = 0;
   let count = 0;
   try {
-    for await (const entry of zip as any) {
+    for await (const entry of zip) {
       count += 1;
       if (count > limits.maxZipEntries) throw quotaExceeded('ZIP contains too many entries');
       const path = safeArchivePath(String(entry.filename));
-      const canonical = path.toLocaleLowerCase();
+      const canonical = path.toLowerCase();
       if (names.has(canonical)) throw badRequest(`ZIP contains a duplicate path: ${path}`);
       names.add(canonical);
       rejectSymlink(entry);
@@ -77,19 +79,19 @@ export async function readOverleafArchive(
   const names = new Set<string>();
   let count = 0;
   try {
-    for await (const entry of zip as any) {
+    for await (const entry of zip) {
       count += 1;
       if (count > limits.maxZipEntries)
         throw quotaExceeded('Overleaf export contains too many entries');
       const filename = String(entry.filename);
       const path = safeArchivePath(filename);
-      const canonical = path.toLocaleLowerCase();
+      const canonical = path.toLowerCase();
       if (names.has(canonical))
         throw badRequest(`Overleaf export contains a duplicate path: ${path}`);
       names.add(canonical);
       rejectSymlink(entry);
       if (filename.endsWith('/')) continue;
-      if (!path.toLocaleLowerCase().endsWith('.zip'))
+      if (!path.toLowerCase().endsWith('.zip'))
         throw badRequest('Overleaf export must contain only project ZIP files');
       const data = await readZipEntry(
         entry,
@@ -127,7 +129,15 @@ export async function registerTransferRoutes(app: FastifyInstance, context: AppC
     const [projectCount] = await context.db
       .select({ count: sql<number>`count(*)::int` })
       .from(projectMemberships)
-      .where(eq(projectMemberships.userId, user.id));
+      .innerJoin(projects, eq(projectMemberships.projectId, projects.id))
+      .leftJoin(userTemplateSeeds, eq(userTemplateSeeds.projectId, projects.id))
+      .where(
+        and(
+          eq(projectMemberships.userId, user.id),
+          isNull(projects.trashedAt),
+          isNull(userTemplateSeeds.projectId),
+        ),
+      );
     if ((projectCount?.count ?? 0) >= context.config.MAX_PROJECTS_PER_USER)
       throw quotaExceeded('Project limit reached');
     const imported = await readProjectArchive(await part.toBuffer(), context.config);
@@ -148,7 +158,15 @@ export async function registerTransferRoutes(app: FastifyInstance, context: AppC
     const [projectCount] = await context.db
       .select({ count: sql<number>`count(*)::int` })
       .from(projectMemberships)
-      .where(eq(projectMemberships.userId, user.id));
+      .innerJoin(projects, eq(projectMemberships.projectId, projects.id))
+      .leftJoin(userTemplateSeeds, eq(userTemplateSeeds.projectId, projects.id))
+      .where(
+        and(
+          eq(projectMemberships.userId, user.id),
+          isNull(projects.trashedAt),
+          isNull(userTemplateSeeds.projectId),
+        ),
+      );
     const existingProjects = projectCount?.count ?? 0;
     if (existingProjects + imports.length > context.config.MAX_PROJECTS_PER_USER)
       throw quotaExceeded(
@@ -264,6 +282,7 @@ export async function registerTransferRoutes(app: FastifyInstance, context: AppC
         ...project!,
         mainFileId,
         sourceRevision: 1,
+        isTemplate: false,
         createdAt: project!.createdAt.toISOString(),
         updatedAt: new Date().toISOString(),
         trashedAt: null,
@@ -320,18 +339,18 @@ function safeArchivePath(filename: string): string {
   }
 }
 
-function rejectSymlink(entry: { externalFileAttributes?: number }) {
-  const mode = Number(entry.externalFileAttributes ?? 0) >>> 16;
+function rejectSymlink(entry: ZipEntry) {
+  const mode = entry.externalFileAttributes >>> 16;
   if ((mode & 0o170000) === 0o120000) throw badRequest('ZIP symlinks are not allowed');
 }
 
 async function readZipEntry(
-  entry: { openReadStream(): Promise<Readable> },
+  entry: ZipEntry,
   maxBytes: number,
   projectBytesRemaining: number,
   path: string,
 ): Promise<Buffer> {
-  const stream = (await entry.openReadStream()) as Readable;
+  const stream: Readable = await entry.openReadStream();
   const chunks: Buffer[] = [];
   let actual = 0;
   for await (const chunk of stream) {

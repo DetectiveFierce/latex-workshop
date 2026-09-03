@@ -32,6 +32,7 @@ export const projectSchema = z.object({
   mainFileId: idSchema.nullable(),
   autoCompile: z.boolean(),
   sourceRevision: z.number().int(),
+  isTemplate: z.boolean(),
   trashedAt: z.iso.datetime().nullable(),
   createdAt: z.iso.datetime(),
   updatedAt: z.iso.datetime(),
@@ -85,6 +86,17 @@ export const libraryResponseSchema = z.object({
   tags: z.array(projectTagSchema),
 });
 export type LibraryResponse = z.infer<typeof libraryResponseSchema>;
+
+export const templateSummarySchema = projectSchema.extend({
+  isStarter: z.boolean(),
+  previewJobId: idSchema.nullable(),
+});
+export type TemplateSummary = z.infer<typeof templateSummarySchema>;
+
+export const templateListResponseSchema = z.object({
+  templates: z.array(templateSummarySchema),
+});
+export type TemplateListResponse = z.infer<typeof templateListResponseSchema>;
 
 export const entrySchema = z.object({
   id: idSchema,
@@ -151,12 +163,14 @@ export type ApiError = z.infer<typeof apiErrorSchema>;
 export const createProjectSchema = z.object({
   name: z.string().trim().min(1).max(120),
   folderId: idSchema.nullable().optional(),
+  templateProjectId: idSchema.nullable().optional(),
 });
 export const updateProjectSchema = z.object({
   name: z.string().trim().min(1).max(120).optional(),
   compiler: compilerEngineSchema.optional(),
   mainFileId: idSchema.optional(),
   autoCompile: z.boolean().optional(),
+  isTemplate: z.boolean().optional(),
 });
 export const createEntrySchema = z.object({
   parentId: idSchema.nullable().default(null),
@@ -406,9 +420,16 @@ export function buildOpenApiDocument(serverUrl: string) {
         },
         post: {
           tags: ['Projects'],
-          summary: 'Create a blank project',
+          summary: 'Create a blank project or copy a live template',
           requestBody: body('CreateProject'),
           responses: { 201: response('ProjectResponse') },
+        },
+      },
+      '/api/v1/templates': {
+        get: {
+          tags: ['Projects'],
+          summary: 'List personal project templates and provision the starter template',
+          responses: { 200: response('TemplateListResponse') },
         },
       },
       '/api/v1/projects/{projectId}': {
@@ -702,6 +723,8 @@ export function buildOpenApiDocument(serverUrl: string) {
         ProjectTag: schemaObject(projectTagSchema),
         LibraryProject: schemaObject(libraryProjectSchema),
         LibraryResponse: schemaObject(libraryResponseSchema),
+        TemplateSummary: schemaObject(templateSummarySchema),
+        TemplateListResponse: schemaObject(templateListResponseSchema),
         Entry: schemaObject(entrySchema),
         CompileJob: schemaObject(compileJobSchema),
         Checkpoint: schemaObject(checkpointSchema),

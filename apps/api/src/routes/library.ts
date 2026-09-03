@@ -96,6 +96,7 @@ async function libraryPayload(context: AppContext, userId: string, trash: boolea
       and(
         eq(projectMemberships.userId, userId),
         trash ? isNotNull(projects.trashedAt) : isNull(projects.trashedAt),
+        ...(trash ? [] : [eq(projects.isTemplate, false)]),
       ),
     )
     .orderBy(desc(projects.updatedAt));
@@ -155,6 +156,7 @@ async function libraryPayload(context: AppContext, userId: string, trash: boolea
       mainFileId: project.mainFileId,
       autoCompile: project.autoCompile,
       sourceRevision: project.sourceRevision,
+      isTemplate: project.isTemplate,
       trashedAt: project.trashedAt?.toISOString() ?? null,
       createdAt: project.createdAt.toISOString(),
       updatedAt: project.updatedAt.toISOString(),

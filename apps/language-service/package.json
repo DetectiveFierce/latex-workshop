@@ -10,7 +10,7 @@
     "start": "node dist/index.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint src",
-    "test": "vitest run --passWithNoTests"
+    "test": "vitest run"
   },
   "dependencies": {
     "@latex-workshop/config": "workspace:*",
@@ -19,8 +19,8 @@
     "@latex-workshop/storage": "workspace:*",
     "better-auth": "1.7.2",
     "drizzle-orm": "0.45.2",
-    "fastify": "5.6.0",
-    "ws": "8.18.3"
+    "fastify": "5.12.1",
+    "ws": "8.21.3"
   },
   "devDependencies": {
     "@types/ws": "8.18.1",

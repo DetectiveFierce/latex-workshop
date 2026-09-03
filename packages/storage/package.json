@@ -8,12 +8,11 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "lint": "eslint src",
-    "test": "vitest run --passWithNoTests"
+    "lint": "eslint src"
   },
   "dependencies": {
-    "@aws-sdk/client-s3": "3.883.0",
-    "@aws-sdk/s3-request-presigner": "3.883.0",
+    "@aws-sdk/client-s3": "3.1125.0",
+    "@aws-sdk/s3-request-presigner": "3.1125.0",
     "@latex-workshop/config": "workspace:*"
   }
 }

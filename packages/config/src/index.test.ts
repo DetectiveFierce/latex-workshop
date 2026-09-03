@@ -40,4 +40,13 @@ describe('loadConfig', () => {
       'HTTPS',
     );
   });
+
+  it.each([
+    ['API_PORT', '0'],
+    ['LSP_PORT', '65536'],
+    ['SMTP_PORT', '1.5'],
+    ['MAX_FILE_BYTES', String(Number.MAX_SAFE_INTEGER + 1)],
+  ])('rejects invalid bounded integer configuration for %s', (key, value) => {
+    expect(() => loadConfig({ ...base, [key]: value })).toThrow();
+  });
 });

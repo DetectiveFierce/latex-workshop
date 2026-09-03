@@ -10,6 +10,7 @@ import { fromNodeHeaders } from 'better-auth/node';
 import { and, eq, sql } from 'drizzle-orm';
 import { WebSocketServer, type WebSocket } from 'ws';
 import { loadConfig } from '@latex-workshop/config';
+import { buildEntryPaths } from '@latex-workshop/contracts';
 import {
   accounts,
   createDatabase,
@@ -22,6 +23,7 @@ import {
   verifications,
 } from '@latex-workshop/db';
 import { ObjectStorage } from '@latex-workshop/storage';
+import { LspFrameDecoder, LspFrameError } from './lsp-framing.js';
 
 const config = loadConfig();
 const { db, client } = createDatabase(config.DATABASE_URL);
@@ -133,12 +135,12 @@ async function bridgeTexLab(socket: WebSocket, projectId: string) {
       .leftJoin(fileVersions, eq(entries.currentVersionId, fileVersions.id))
       .leftJoin(fileBlobs, eq(fileVersions.blobHash, fileBlobs.hash))
       .where(eq(entries.projectId, projectId));
-    const byId = new Map(rows.map(({ entry }) => [entry.id, entry]));
-    const pathFor = (entry: typeof entries.$inferSelect): string =>
-      entry.parentId ? `${pathFor(byId.get(entry.parentId)!)}/${entry.name}` : entry.name;
+    const paths = buildEntryPaths(rows.map(({ entry }) => entry));
     for (const row of rows) {
       if (row.entry.kind !== 'file' || !row.blob) continue;
-      const target = join(workspace, pathFor(row.entry));
+      const path = paths.get(row.entry.id);
+      if (!path) throw new Error('Language-service file path is missing');
+      const target = join(workspace, path);
       await mkdir(dirname(target), { recursive: true });
       await writeFile(target, await storage.getBuffer(row.blob.objectKey));
     }
@@ -149,7 +151,7 @@ async function bridgeTexLab(socket: WebSocket, projectId: string) {
       env: { PATH: process.env.PATH ?? '/usr/bin', HOME: workspace },
     });
     const serverRoot = pathToFileURL(workspace).href.replace(/\/$/, '');
-    let output = Buffer.alloc(0);
+    const decoder = new LspFrameDecoder();
     forwardMessage = (message: string) => {
       try {
         const parsed = JSON.parse(message) as { method?: string; id?: string | number };
@@ -180,19 +182,16 @@ async function bridgeTexLab(socket: WebSocket, projectId: string) {
     };
     for (const message of queuedMessages.splice(0)) forwardMessage(message);
     processHandle.stdout.on('data', (chunk: Buffer) => {
-      output = Buffer.concat([output, chunk]);
-      while (true) {
-        const boundary = output.indexOf('\r\n\r\n');
-        if (boundary < 0) break;
-        const header = output.subarray(0, boundary).toString('ascii');
-        const length = Number(header.match(/Content-Length:\s*(\d+)/i)?.[1]);
-        if (!Number.isFinite(length) || output.length < boundary + 4 + length) break;
-        const body = output
-          .subarray(boundary + 4, boundary + 4 + length)
-          .toString('utf8')
-          .replaceAll(serverRoot, 'file:///workspace');
-        output = output.subarray(boundary + 4 + length);
-        if (socket.readyState === socket.OPEN) socket.send(body);
+      try {
+        for (const message of decoder.push(chunk)) {
+          const body = message.replaceAll(serverRoot, 'file:///workspace');
+          if (socket.readyState === socket.OPEN) socket.send(body);
+        }
+      } catch (error) {
+        const detail = error instanceof LspFrameError ? error.message : 'unknown framing error';
+        console.error(`[texlab:${projectId}] ${detail}`);
+        processHandle?.kill('SIGKILL');
+        if (socket.readyState === socket.OPEN) socket.close(1011, 'Invalid language-server output');
       }
     });
     processHandle.stderr.on('data', (chunk: Buffer) =>

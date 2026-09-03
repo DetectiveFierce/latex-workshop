@@ -20,7 +20,9 @@ if [ ! -f "$release_dir/infra/compose/self-hosted.yml" ]; then
 fi
 
 mkdir -p "$compile_dir" "$backup_stage"
-docker run --rm -v "$compile_dir:/work" busybox:latest chown 10001:10001 /work
+if [ "$(stat -c '%u:%g' "$compile_dir")" != '10001:10001' ]; then
+  docker run --rm -v "$compile_dir:/work" busybox:latest chown 10001:10001 /work
+fi
 
 if [ ! -f "$env_file" ]; then
   umask 077

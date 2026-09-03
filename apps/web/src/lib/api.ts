@@ -87,6 +87,7 @@ export function uploadForm<T>(
 export const queryKeys = {
   projects: (trash = false) => ['projects', trash] as const,
   library: (trash = false) => ['library', trash] as const,
+  templates: ['templates'] as const,
   project: (id: string) => ['project', id] as const,
   compiles: (id: string) => ['compiles', id] as const,
   checkpoints: (id: string) => ['checkpoints', id] as const,

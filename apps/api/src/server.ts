@@ -18,6 +18,7 @@ import { registerHistoryRoutes } from './routes/history.js';
 import { registerLibraryRoutes } from './routes/library.js';
 import { registerProjectRoutes } from './routes/projects.js';
 import { registerTransferRoutes } from './routes/transfers.js';
+import { registerTemplateRoutes } from './routes/templates.js';
 import { registerPreferenceRoutes } from './routes/preferences.js';
 import { registerEditHistoryRoutes } from './routes/edit-history.js';
 
@@ -126,6 +127,7 @@ export async function buildServer() {
   await registerHistoryRoutes(app, context);
   await registerCompileRoutes(app, context);
   await registerTransferRoutes(app, context);
+  await registerTemplateRoutes(app, context);
   await registerPreferenceRoutes(app, context);
   await registerEditHistoryRoutes(app, context);
   const stopMaintenance =
@@ -133,6 +135,15 @@ export async function buildServer() {
 
   app.setErrorHandler((error, request, reply) => {
     const postgresCode = findDatabaseCode(error);
+    const errorRecord =
+      typeof error === 'object' && error !== null
+        ? (error as { statusCode?: unknown; validation?: unknown })
+        : null;
+    const validationError = errorRecord?.validation !== undefined;
+    const clientStatusCode =
+      typeof errorRecord?.statusCode === 'number' && errorRecord.statusCode < 500
+        ? errorRecord.statusCode
+        : null;
     const statusCode =
       error instanceof HttpError
         ? error.statusCode
@@ -140,10 +151,10 @@ export async function buildServer() {
           ? 409
           : postgresCode === '23503'
             ? 400
-            : error.validation
+            : validationError
               ? 400
-              : typeof error.statusCode === 'number' && error.statusCode < 500
-                ? error.statusCode
+              : clientStatusCode !== null
+                ? clientStatusCode
                 : 500;
     const code =
       error instanceof HttpError
@@ -152,7 +163,7 @@ export async function buildServer() {
           ? 'CONFLICT'
           : postgresCode === '23503'
             ? 'INVALID_REFERENCE'
-            : error.validation
+            : validationError
               ? 'VALIDATION_ERROR'
               : 'INTERNAL_ERROR';
     if (statusCode >= 500) request.log.error(error);
@@ -166,7 +177,9 @@ export async function buildServer() {
               ? 'An item with that name already exists'
               : postgresCode === '23503'
                 ? 'A referenced item does not exist'
-                : error.message,
+                : error instanceof Error
+                  ? error.message
+                  : 'The request could not be processed',
         ...(error instanceof HttpError && error.details !== undefined
           ? { details: error.details }
           : {}),

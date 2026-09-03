@@ -11,9 +11,6 @@ import {
 } from '@tanstack/react-router';
 import { authClient } from './lib/auth';
 import { APP_BASE } from './lib/api';
-import { AuthPage } from './routes/AuthPage';
-import { DashboardPage } from './routes/DashboardPage';
-import { AccountPage } from './routes/AccountPage';
 import { applyAppearance } from './lib/appearance';
 import { applyRequestedLayout } from './lib/layout';
 import '@fontsource/inter/latin-400.css';
@@ -27,6 +24,15 @@ import './styles/app.css';
 applyRequestedLayout();
 applyAppearance();
 
+const AuthPage = lazy(() =>
+  import('./routes/AuthPage').then(({ AuthPage: component }) => ({ default: component })),
+);
+const DashboardPage = lazy(() =>
+  import('./routes/DashboardPage').then(({ DashboardPage: component }) => ({ default: component })),
+);
+const AccountPage = lazy(() =>
+  import('./routes/AccountPage').then(({ AccountPage: component }) => ({ default: component })),
+);
 const WorkspacePage = lazy(() => import('./routes/WorkspacePage'));
 const PdfPage = lazy(() => import('./routes/PdfPage'));
 
@@ -46,7 +52,11 @@ const indexRoute = createRoute({
 const authRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/auth',
-  component: AuthPage,
+  component: () => (
+    <Suspense fallback={<FullScreenLoader label="Opening account…" />}>
+      <AuthPage />
+    </Suspense>
+  ),
 });
 const projectsRoute = createRoute({
   getParentRoute: () => rootRoute,
@@ -54,7 +64,7 @@ const projectsRoute = createRoute({
   validateSearch: (
     search: Record<string, unknown>,
   ): {
-    view?: 'all' | 'recent' | 'favorites' | 'folder' | 'tag' | 'trash';
+    view?: 'all' | 'recent' | 'favorites' | 'templates' | 'folder' | 'tag' | 'trash';
     folder?: string;
     tag?: string;
     q?: string;
@@ -63,8 +73,10 @@ const projectsRoute = createRoute({
     const view = String(search.view);
     const sort = String(search.sort);
     return {
-      ...(['all', 'recent', 'favorites', 'folder', 'tag', 'trash'].includes(view)
-        ? { view: view as 'all' | 'recent' | 'favorites' | 'folder' | 'tag' | 'trash' }
+      ...(['all', 'recent', 'favorites', 'templates', 'folder', 'tag', 'trash'].includes(view)
+        ? {
+            view: view as 'all' | 'recent' | 'favorites' | 'templates' | 'folder' | 'tag' | 'trash',
+          }
         : {}),
       ...(typeof search.folder === 'string' ? { folder: search.folder } : {}),
       ...(typeof search.tag === 'string' ? { tag: search.tag } : {}),
@@ -81,12 +93,20 @@ const projectsRoute = createRoute({
         : {}),
     };
   },
-  component: DashboardPage,
+  component: () => (
+    <Suspense fallback={<FullScreenLoader label="Opening library…" />}>
+      <DashboardPage />
+    </Suspense>
+  ),
 });
 const accountRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/account',
-  component: AccountPage,
+  component: () => (
+    <Suspense fallback={<FullScreenLoader label="Opening settings…" />}>
+      <AccountPage />
+    </Suspense>
+  ),
 });
 const workspaceRoute = createRoute({
   getParentRoute: () => rootRoute,

@@ -274,10 +274,11 @@ export function EditorPane({
           }
           const model = Monaco.editor.getModel(Monaco.Uri.parse(target.modelPath));
           if (model) lspRef.current?.save(model);
-        } catch (error: any) {
-          if (error?.code === 'CONFLICT' && error.details) {
+        } catch (error) {
+          const conflict = conflictDetails(error);
+          if (conflict) {
             setControllerSaveState(target, 'conflict');
-            onConflictRef.current(entryId, target.latestValue, error.details);
+            onConflictRef.current(entryId, target.latestValue, conflict);
           } else {
             setControllerSaveState(target, 'offline');
           }
@@ -634,6 +635,19 @@ function monacoKeybinding(monaco: typeof Monaco, binding: string): number | null
 }
 
 const isMacRuntime = () => /Mac|iPhone|iPad/.test(navigator.platform);
+
+function conflictDetails(error: unknown): { version: number; content: string } | null {
+  if (typeof error !== 'object' || error === null) return null;
+  const candidate = error as { code?: unknown; details?: unknown };
+  if (candidate.code !== 'CONFLICT' || typeof candidate.details !== 'object' || !candidate.details)
+    return null;
+  const details = candidate.details as { version?: unknown; content?: unknown };
+  return typeof details.version === 'number' &&
+    Number.isInteger(details.version) &&
+    typeof details.content === 'string'
+    ? { version: details.version, content: details.content }
+    : null;
+}
 
 function snapshotSelections(
   selections: Monaco.Selection[] | null | undefined,

@@ -11,12 +11,13 @@ const defaults: AppearancePreferences = { editorFontSize: 13, uiScale: 1 };
 
 export function readAppearance(): AppearancePreferences {
   try {
-    const value = JSON.parse(
-      localStorage.getItem(STORAGE_KEY) ?? 'null',
-    ) as Partial<AppearancePreferences> | null;
+    const raw: unknown = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? 'null');
+    const value = typeof raw === 'object' && raw !== null ? raw : null;
+    const editorFontSize = value && 'editorFontSize' in value ? value.editorFontSize : undefined;
+    const uiScale = value && 'uiScale' in value ? value.uiScale : undefined;
     return {
-      editorFontSize: clamp(value?.editorFontSize ?? defaults.editorFontSize, 11, 22),
-      uiScale: clamp(value?.uiScale ?? defaults.uiScale, 0.9, 1.2),
+      editorFontSize: clampNumber(editorFontSize, defaults.editorFontSize, 11, 22),
+      uiScale: clampNumber(uiScale, defaults.uiScale, 0.9, 1.2),
     };
   } catch {
     return defaults;
@@ -43,8 +44,8 @@ export function useAppearance() {
   const update = useCallback((next: Partial<AppearancePreferences>) => {
     const current = readAppearance();
     const value = {
-      editorFontSize: clamp(next.editorFontSize ?? current.editorFontSize, 11, 22),
-      uiScale: clamp(next.uiScale ?? current.uiScale, 0.9, 1.2),
+      editorFontSize: clampNumber(next.editorFontSize, current.editorFontSize, 11, 22),
+      uiScale: clampNumber(next.uiScale, current.uiScale, 0.9, 1.2),
     };
     localStorage.setItem(STORAGE_KEY, JSON.stringify(value));
     applyAppearance(value);
@@ -55,6 +56,9 @@ export function useAppearance() {
   return { preferences, update };
 }
 
-function clamp(value: number, min: number, max: number) {
-  return Math.min(max, Math.max(min, Number.isFinite(value) ? value : min));
+function clampNumber(value: unknown, fallback: number, min: number, max: number) {
+  return Math.min(
+    max,
+    Math.max(min, typeof value === 'number' && Number.isFinite(value) ? value : fallback),
+  );
 }

@@ -126,6 +126,15 @@ describe('TexLabClient lifecycle', () => {
       symbols: 1,
     });
     expect(statuses).toContain('ready');
+    for (const data of [
+      'not json',
+      'null',
+      '[]',
+      '{"jsonrpc":"1.0"}',
+      '{"jsonrpc":"2.0","id":{}}',
+    ]) {
+      expect(() => first.onmessage?.({ data })).not.toThrow();
+    }
 
     first.disconnect();
     expect(statuses.at(-1)).toBe('reconnecting');

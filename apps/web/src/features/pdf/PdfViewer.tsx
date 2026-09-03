@@ -520,10 +520,16 @@ function isAbortError(cause: unknown) {
 
 function readPdfState(key: string): { page: number; scale: string } | null {
   try {
-    return JSON.parse(localStorage.getItem(`pdf-state:${key}`) ?? 'null') as {
-      page: number;
-      scale: string;
-    } | null;
+    const value: unknown = JSON.parse(localStorage.getItem(`pdf-state:${key}`) ?? 'null');
+    if (typeof value !== 'object' || value === null) return null;
+    const state = value as { page?: unknown; scale?: unknown };
+    return Number.isInteger(state.page) &&
+      typeof state.page === 'number' &&
+      state.page > 0 &&
+      typeof state.scale === 'string' &&
+      state.scale.length <= 40
+      ? { page: state.page, scale: state.scale }
+      : null;
   } catch {
     return null;
   }

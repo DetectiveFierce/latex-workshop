@@ -61,9 +61,9 @@ const worker = new Worker<{ compileJobId: string }>(
     const succeeded = result.exitCode === 0 && result.pdf !== null;
     let pdfObjectKey: string | null = null;
     let synctexObjectKey: string | null = null;
-    if (succeeded) {
+    if (result.exitCode === 0 && result.pdf !== null) {
       pdfObjectKey = `artifacts/${job.projectId}/${job.id}/document.pdf`;
-      await storage.put(pdfObjectKey, result.pdf!, 'application/pdf');
+      await storage.put(pdfObjectKey, result.pdf, 'application/pdf');
       if (result.synctex) {
         synctexObjectKey = `artifacts/${job.projectId}/${job.id}/document.synctex.gz`;
         await storage.put(synctexObjectKey, result.synctex, 'application/gzip');
@@ -82,7 +82,7 @@ const worker = new Worker<{ compileJobId: string }>(
       })
       .where(eq(compileJobs.id, job.id))
       .returning();
-    await publish(job.projectId, { type: 'status', job: serialize(updated!) });
+    if (updated) await publish(job.projectId, { type: 'status', job: serialize(updated) });
   },
   { connection: redis, concurrency: 2, limiter: { max: 20, duration: 60_000 } },
 );
@@ -117,11 +117,19 @@ function serialize(job: typeof compileJobs.$inferSelect) {
   };
 }
 
+let shutdownStarted = false;
 const shutdown = async () => {
+  if (shutdownStarted) return;
+  shutdownStarted = true;
   await worker.close();
-  await redis.quit();
+  if (redis.status !== 'end') await redis.quit();
   await client.end();
-  process.exit(0);
 };
-process.on('SIGINT', shutdown);
-process.on('SIGTERM', shutdown);
+const requestShutdown = () => {
+  void shutdown().catch((error: unknown) => {
+    console.error('Compile worker shutdown failed', error);
+    process.exitCode = 1;
+  });
+};
+process.once('SIGINT', requestShutdown);
+process.once('SIGTERM', requestShutdown);

@@ -26,7 +26,6 @@ compose() {
 cleanup() {
   if [ "$stopped" = true ]; then
     compose up -d api language-service compile-worker >/dev/null 2>&1 || true
-    compose restart web >/dev/null 2>&1 || true
   fi
   rm -rf "$stage_dir"/*
   rm -f "$partial"
@@ -40,11 +39,23 @@ stopped=true
 compose exec -T postgres pg_dump \
   --username "$(sed -n 's/^POSTGRES_USER=//p' "$env_file")" \
   --dbname "$(sed -n 's/^POSTGRES_DB=//p' "$env_file")" \
-  --format custom >"$stage_dir/postgres.dump"
-compose run --rm -T --no-deps minio-backup </dev/null
+  --format custom >"$stage_dir/postgres.dump" &
+postgres_backup_pid=$!
+compose run --rm -T --no-deps minio-backup </dev/null &
+object_backup_pid=$!
+
+backup_failed=false
+if ! wait "$postgres_backup_pid"; then
+  echo 'PostgreSQL backup failed.' >&2
+  backup_failed=true
+fi
+if ! wait "$object_backup_pid"; then
+  echo 'Object-storage backup failed.' >&2
+  backup_failed=true
+fi
+[ "$backup_failed" = false ]
 
 compose up -d api language-service compile-worker
-compose restart web
 stopped=false
 
 compose images --format json >"$stage_dir/images.json"

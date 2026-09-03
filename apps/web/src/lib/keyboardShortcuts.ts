@@ -2,21 +2,17 @@ import { useQuery } from '@tanstack/react-query';
 import type { KeyboardEvent as ReactKeyboardEvent } from 'react';
 import {
   canonicalizeShortcutSequence,
+  keyboardShortcutsResponseSchema,
   resolveShortcutBindings,
   shortcutRegistry,
   type KeyboardKeymap,
-  type KeyboardShortcutProfiles,
   type KeyboardShortcutOverrides,
+  type KeyboardShortcutsResponse,
   type ShortcutActionId,
 } from '@latex-workshop/contracts';
 import { api, queryKeys } from './api';
 
-export type KeyboardShortcutsResponse = {
-  version: 2;
-  keymap: KeyboardKeymap;
-  overrides: KeyboardShortcutProfiles;
-  updatedAt: string | null;
-};
+export type { KeyboardShortcutsResponse } from '@latex-workshop/contracts';
 
 export const isMacPlatform = () =>
   typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform);
@@ -28,7 +24,9 @@ export function shortcutCacheKey(userId: string) {
 export function readShortcutCache(userId: string): KeyboardShortcutsResponse | undefined {
   try {
     const value = localStorage.getItem(shortcutCacheKey(userId));
-    return value ? (JSON.parse(value) as KeyboardShortcutsResponse) : undefined;
+    if (!value) return undefined;
+    const parsed = keyboardShortcutsResponseSchema.safeParse(JSON.parse(value));
+    return parsed.success ? parsed.data : undefined;
   } catch {
     return undefined;
   }

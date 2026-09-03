@@ -54,6 +54,36 @@ describe('archive imports', () => {
       'Project ZIP is invalid or corrupted',
     );
   });
+
+  it('rejects case-insensitive duplicate paths', async () => {
+    const archive = await makeZip([
+      ['MAIN.tex', 'first'],
+      ['main.tex', 'second'],
+    ]);
+
+    await expect(readProjectArchive(archive, config)).rejects.toThrow('duplicate path');
+  });
+
+  it('enforces the file limit against expanded bytes', async () => {
+    const archive = await makeZip([['main.tex', 'too large']]);
+
+    await expect(
+      readProjectArchive(archive, { MAX_FILE_BYTES: 4, MAX_PROJECT_BYTES: 100 }),
+    ).rejects.toThrow('too large');
+  });
+
+  it('rejects deterministically fuzzed corrupt archives without hanging', async () => {
+    let state = 0x51a7e;
+    const random = () => {
+      state = (Math.imul(state, 1_664_525) + 1_013_904_223) >>> 0;
+      return state;
+    };
+
+    for (let run = 0; run < 250; run += 1) {
+      const bytes = Buffer.from(Array.from({ length: random() % 256 }, () => random() & 0xff));
+      await expect(readProjectArchive(bytes, config)).rejects.toBeInstanceOf(Error);
+    }
+  });
 });
 
 async function makeZip(files: Array<[string, string | Buffer]>): Promise<Buffer> {

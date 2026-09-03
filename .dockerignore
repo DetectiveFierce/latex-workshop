@@ -2,8 +2,16 @@ node_modules
 **/node_modules
 **/dist
 .git
+.github
+.env
 .turbo
 coverage
 data
+docs
+tests
 tmp
 playwright-report
+test-results
+**/*.test.ts
+**/*.test.tsx
+**/*.tsbuildinfo

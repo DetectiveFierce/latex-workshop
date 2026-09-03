@@ -29,25 +29,10 @@ import {
   requireProject,
   requireLibraryFolder,
   saveTextFileVersion,
-  sha256,
   storeFileVersion,
 } from '../lib/domain.js';
+import { cloneProjectHead, createBlankProject } from '../lib/project-creation.js';
 import { badRequest, conflict, notFound, quotaExceeded } from '../lib/errors.js';
-
-const defaultDocument = String.raw`\documentclass{article}
-\usepackage[T1]{fontenc}
-\usepackage{lmodern}
-\title{Untitled Document}
-\author{}
-\date{\today}
-
-\begin{document}
-\maketitle
-
-Start writing here.
-
-\end{document}
-`;
 
 function publicProject(project: typeof projects.$inferSelect) {
   return {
@@ -78,78 +63,18 @@ async function assertParent(context: AppContext, projectId: string, parentId: st
   if (!parent) throw badRequest('Parent folder does not exist');
 }
 
-async function createProject(
-  context: AppContext,
-  userId: string,
-  name: string,
-  folderId: string | null = null,
-) {
-  const counts = await context.db
-    .select({ count: sql<number>`count(*)::int` })
-    .from(projectMemberships)
-    .innerJoin(projects, eq(projectMemberships.projectId, projects.id))
-    .where(and(eq(projectMemberships.userId, userId), isNull(projects.trashedAt)));
-  if ((counts[0]?.count ?? 0) >= context.config.MAX_PROJECTS_PER_USER)
-    throw quotaExceeded('Project limit reached');
-
-  const bytes = Buffer.from(defaultDocument);
-  const hash = sha256(bytes);
-  const objectKey = `blobs/${hash.slice(0, 2)}/${hash}`;
-  await context.storage.put(objectKey, bytes, 'text/x-tex');
-
-  return context.db.transaction(async (tx) => {
-    const [project] = await tx.insert(projects).values({ name }).returning();
-    await tx
-      .insert(projectMemberships)
-      .values({ projectId: project!.id, userId, role: 'owner', folderId });
-    const [entry] = await tx
-      .insert(entries)
-      .values({
-        projectId: project!.id,
-        name: 'main.tex',
-        kind: 'file',
-        mimeType: 'text/x-tex',
-        size: bytes.byteLength,
-      })
-      .returning();
-    await tx
-      .insert(fileBlobs)
-      .values({ hash, objectKey, size: bytes.byteLength })
-      .onConflictDoUpdate({
-        target: fileBlobs.hash,
-        set: { refCount: sql`${fileBlobs.refCount} + 1` },
-      });
-    const [version] = await tx
-      .insert(fileVersions)
-      .values({ entryId: entry!.id, blobHash: hash, version: 1 })
-      .returning();
-    const [result] = await tx
-      .update(projects)
-      .set({ mainFileId: entry!.id, sourceRevision: 1, updatedAt: new Date() })
-      .where(eq(projects.id, project!.id))
-      .returning();
-    await tx
-      .update(entries)
-      .set({ currentVersionId: version!.id, version: 1 })
-      .where(eq(entries.id, entry!.id));
-    await tx
-      .insert(auditEvents)
-      .values({ userId, projectId: project!.id, action: 'project.created' });
-    return result!;
-  });
-}
-
 export async function registerProjectRoutes(app: FastifyInstance, context: AppContext) {
   app.get('/api/v1/projects', async (request) => {
     const user = await requireUser(context, request);
     const query = request.query as { trash?: string; search?: string };
     const trashClause =
       query.trash === 'true' ? isNotNull(projects.trashedAt) : isNull(projects.trashedAt);
+    const templateClause = query.trash === 'true' ? undefined : eq(projects.isTemplate, false);
     const rows = await context.db
       .select({ project: projects })
       .from(projects)
       .innerJoin(projectMemberships, eq(projectMemberships.projectId, projects.id))
-      .where(and(eq(projectMemberships.userId, user.id), trashClause))
+      .where(and(eq(projectMemberships.userId, user.id), trashClause, templateClause))
       .orderBy(desc(projects.updatedAt));
     const projectIds = rows.map(({ project }) => project.id);
     const successfulCompiles = projectIds.length
@@ -186,7 +111,15 @@ export async function registerProjectRoutes(app: FastifyInstance, context: AppCo
     const user = await requireUser(context, request);
     const input = createProjectSchema.parse(request.body);
     if (input.folderId) await requireLibraryFolder(context.db, user.id, input.folderId);
-    const project = await createProject(context, user.id, input.name, input.folderId ?? null);
+    const project = input.templateProjectId
+      ? await cloneProjectHead(context, {
+          userId: user.id,
+          sourceProjectId: input.templateProjectId,
+          name: input.name,
+          folderId: input.folderId ?? null,
+          requireTemplate: true,
+        })
+      : await createBlankProject(context, user.id, input.name, input.folderId ?? null);
     return reply.code(201).send({ project: publicProject(project) });
   });
 
@@ -215,7 +148,7 @@ export async function registerProjectRoutes(app: FastifyInstance, context: AppCo
   app.patch('/api/v1/projects/:projectId', async (request) => {
     const user = await requireUser(context, request);
     const { projectId } = request.params as { projectId: string };
-    await requireProject(context.db, user.id, projectId);
+    const projectBefore = await requireProject(context.db, user.id, projectId);
     const input = updateProjectSchema.parse(request.body);
     if (input.mainFileId) {
       const [main] = await context.db
@@ -232,11 +165,20 @@ export async function registerProjectRoutes(app: FastifyInstance, context: AppCo
       if (!main || !main.name.endsWith('.tex'))
         throw badRequest('Main file must be a .tex file in this project');
     }
-    const [project] = await context.db
-      .update(projects)
-      .set({ ...input, updatedAt: new Date() })
-      .where(eq(projects.id, projectId))
-      .returning();
+    const [project] = await context.db.transaction(async (tx) => {
+      const [updated] = await tx
+        .update(projects)
+        .set({ ...input, updatedAt: new Date() })
+        .where(eq(projects.id, projectId))
+        .returning();
+      if (input.isTemplate !== undefined && input.isTemplate !== projectBefore.isTemplate)
+        await tx.insert(auditEvents).values({
+          userId: user.id,
+          projectId,
+          action: input.isTemplate ? 'project.template_enabled' : 'project.template_disabled',
+        });
+      return [updated!];
+    });
     return { project: publicProject(project!) };
   });
 
@@ -259,80 +201,18 @@ export async function registerProjectRoutes(app: FastifyInstance, context: AppCo
           eq(projectTagAssignments.userId, user.id),
         ),
       );
-    const sourceEntries = await context.db
-      .select()
-      .from(entries)
-      .where(eq(entries.projectId, projectId));
-    const result = await createProject(
-      context,
-      user.id,
-      `${source.name} copy`,
-      sourceMembership?.folderId ?? null,
-    );
-    const [defaultEntry] = await context.db
-      .select()
-      .from(entries)
-      .where(eq(entries.projectId, result.id));
-    if (defaultEntry) await context.db.delete(entries).where(eq(entries.id, defaultEntry.id));
-    const paths = buildEntryPaths(sourceEntries);
-    const sorted = [...sourceEntries].sort(
-      (a, b) => paths.get(a.id)!.split('/').length - paths.get(b.id)!.split('/').length,
-    );
-    const idMap = new Map<string, string>();
-    for (const sourceEntry of sorted) {
-      const [copy] = await context.db
-        .insert(entries)
-        .values({
-          projectId: result.id,
-          parentId: sourceEntry.parentId ? (idMap.get(sourceEntry.parentId) ?? null) : null,
-          name: sourceEntry.name,
-          kind: sourceEntry.kind,
-          mimeType: sourceEntry.mimeType,
-          size: sourceEntry.size,
-          version: sourceEntry.version,
-          currentVersionId: null,
-        })
-        .returning();
-      idMap.set(sourceEntry.id, copy!.id);
-      if (sourceEntry.currentVersionId) {
-        const [oldVersion] = await context.db
-          .select()
-          .from(fileVersions)
-          .where(eq(fileVersions.id, sourceEntry.currentVersionId))
-          .limit(1);
-        if (oldVersion) {
-          const [newVersion] = await context.db
-            .insert(fileVersions)
-            .values({ entryId: copy!.id, blobHash: oldVersion.blobHash, version: 1 })
-            .returning();
-          await context.db
-            .update(entries)
-            .set({ currentVersionId: newVersion!.id, version: 1 })
-            .where(eq(entries.id, copy!.id));
-          await context.db
-            .update(fileBlobs)
-            .set({ refCount: sql`${fileBlobs.refCount} + 1` })
-            .where(eq(fileBlobs.hash, oldVersion.blobHash));
-        }
-      }
-    }
-    const mainFileId = source.mainFileId ? (idMap.get(source.mainFileId) ?? null) : null;
-    const [updated] = await context.db
-      .update(projects)
-      .set({
-        compiler: source.compiler,
-        mainFileId,
-        autoCompile: source.autoCompile,
-        sourceRevision: source.sourceRevision,
-        updatedAt: new Date(),
-      })
-      .where(eq(projects.id, result.id))
-      .returning();
+    const updated = await cloneProjectHead(context, {
+      userId: user.id,
+      sourceProjectId: projectId,
+      name: `${source.name} copy`,
+      folderId: sourceMembership?.folderId ?? null,
+      requireTemplate: false,
+    });
     if (sourceTags.length)
       await context.db
         .insert(projectTagAssignments)
-        .values(sourceTags.map(({ tagId }) => ({ projectId: result.id, tagId, userId: user.id })));
-    return reply.code(201).send({ project: publicProject(updated!) });
+        .values(sourceTags.map(({ tagId }) => ({ projectId: updated.id, tagId, userId: user.id })));
+    return reply.code(201).send({ project: publicProject(updated) });
   });
 
   app.delete('/api/v1/projects/:projectId', async (request, reply) => {

@@ -1,0 +1,199 @@
+% config.tex
+
+% Geometry and page layout
+\geometry{margin=0.75in}
+
+% Fancyhdr sizing adjustments
+\setlength{\headheight}{14.4pt}        % Fix for fancyhdr header size warning
+\addtolength{\topmargin}{-2.4pt}       % Optional: counteract added header height
+
+% Table layout tweaks
+\renewcommand\arraystretch{1.3} % global row spacing
+\setcellgapes{4pt}              % extra padding inside cells
+\makegapedcells
+
+% Color definitions
+\definecolor{mygreen}{RGB}{131, 176, 47}
+\definecolor{textgreen}{RGB}{129, 186, 24}
+\definecolor{myred}{RGB}{195, 30, 74}
+\definecolor{myblue}{RGB}{0, 140, 158}
+\definecolor{myorange}{RGB}{240, 110, 41}
+\definecolor{mygrey}{RGB}{156, 156, 156}
+\definecolor{codecommentcolor}{RGB}{156, 156, 156}
+\definecolor{dark}{HTML}{83B02F}
+\definecolor{light}{HTML}{e1f0c7}
+
+% Pure LaTeX code styling, replacing Pandoc/knitr token hooks.
+\definecolor{shadecolor}{RGB}{252,249,236}
+\lstdefinestyle{templatecode}{
+  backgroundcolor=\color{shadecolor},
+  basicstyle=\footnotesize\ttfamily,
+  keywordstyle=\color{mygreen}\bfseries,
+  commentstyle=\color{codecommentcolor}\itshape,
+  stringstyle=\color{myred},
+  numberstyle=\tiny\color{mygrey},
+  identifierstyle=\color{black},
+  showstringspaces=false,
+  breaklines=true,
+  columns=fullflexible,
+  keepspaces=true,
+  frame=single,
+  rulecolor=\color{light},
+  framerule=0.4pt,
+  framesep=6pt,
+  aboveskip=1em,
+  belowskip=1em
+}
+\lstset{style=templatecode}
+
+% Math spacing adjustments
+\setlength{\abovedisplayskip}{5pt}
+\setlength{\belowdisplayskip}{5pt}
+\setlength{\abovedisplayshortskip}{1pt}
+\setlength{\belowdisplayshortskip}{1pt}
+
+% List and section formatting
+\renewcommand{\labelitemii}{$\triangleright$}
+\titleformat{\subsection}[runin]{\normalfont\large\bfseries}{\thesubsection}{1em}{}
+\renewcommand\CancelColor{\color{red}}
+\pdfstringdefDisableCommands{%
+  \def\scalebox#1#2{#2}%
+  \def\quad{ }%
+  \def\normalsize{}%
+}
+
+% Header text autoscaling support
+\newcommand{\headertext}{}
+\newlength{\headertextwidth}
+\newcommand{\autoscaleheader}[1]{%
+    \settowidth{\headertextwidth}{#1}%
+    \ifdim\headertextwidth>0.55\textwidth
+        \renewcommand{\headertext}{\scalebox{0.85}{#1}}%
+        \fancyhead[L]{}%
+    \else
+        \renewcommand{\headertext}{#1}%
+        \fancyhead[L]{\today}%
+    \fi
+}
+
+% First page style
+\fancypagestyle{firstpage}{
+  \fancyhf{}
+  \fancyhead[L]{\myauthor}
+  \fancyhead[R]{\today}
+  \fancyhead[C]{\mytitle}
+  \renewcommand{\headrule}{%
+      \hrule height 0.4pt \vspace{3pt}
+      \rule{0.5\textwidth}{0.4pt} \\[-12pt]
+      \rule{0.25\textwidth}{0.4pt}
+      \vspace{-10pt}
+  }
+}
+
+% Default header/footer setup
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[R]{\thepage}
+\fancyhead[C]{\normalsize \headertext}
+\fancyhead[L]{\today}
+\renewcommand{\headrule}{%
+    \hrule height 0.4pt \vspace{3pt}
+    \rule{0.5\textwidth}{0.4pt} \\[-13pt]
+    \rule{0.25\textwidth}{0.4pt}
+    \vspace{-10pt}
+}
+\fancyfoot{}
+
+% Custom heading logic (section/subsection helpers and multiheading)
+\makeatletter
+\newcommand{\getcleansection}{%
+    \expandafter\getcleansection@aux\leftmark\@nil
+}
+\def\getcleansection@aux#1\@nil{#1}
+
+\newcommand{\@UNsection}[2]{%
+    \section{\scalebox{#2}[#2]{#1}}%
+    \markboth{\normalsize #1}{}%
+    \autoscaleheader{{\normalsize #1 \quad - \quad}}%
+    \ifnum\value{page}=1\else
+        \fancyhead[C]{\headertext}%
+        \thispagestyle{fancy}%
+    \fi
+}
+
+\newcommand{\UNsection}{%
+    \@ifnextchar\bgroup
+        {\@UNsectionWithScale}
+        {\@UNsectionDefault}
+}
+\newcommand{\@UNsectionWithScale}[1]{%
+    \@ifnextchar\bgroup
+        {\@UNsectionWithScaleAndTitle{#1}}
+        {\@UNsection{#1}{1.0}}%
+}
+\newcommand{\@UNsectionWithScaleAndTitle}[2]{%
+    \@UNsection{#1}{#2}%
+}
+\newcommand{\@UNsectionDefault}[1]{%
+    \@UNsection{#1}{1.0}%
+}
+
+\newcommand{\@UNsubsection}[2]{%
+    \subsection{\scalebox{#2}[#2]{#1}}%
+    \markright{#1}%
+    \autoscaleheader{{\getcleansection \quad - \quad #1}}%
+    \ifnum\value{page}=1\else
+        \fancyhead[C]{\headertext}%
+        \thispagestyle{fancy}%
+    \fi
+}
+\newcommand{\UNsubsection}{%
+    \@ifnextchar\bgroup
+        {\@UNsubsectionWithScale}
+        {\@UNsubsectionDefault}
+}
+\newcommand{\@UNsubsectionWithScale}[1]{%
+    \@ifnextchar\bgroup
+        {\@UNsubsectionWithScaleAndTitle{#1}}
+        {\@UNsubsection{#1}{1.0}}%
+}
+\newcommand{\@UNsubsectionWithScaleAndTitle}[2]{%
+    \@UNsubsection{#1}{#2}%
+}
+\newcommand{\@UNsubsectionDefault}[1]{%
+    \@UNsubsection{#1}{1.0}%
+}
+
+% Multiheading
+\newcommand{\@multiheading}[3]{%
+    \section*{\Large\scalebox{#3}[#3]{#1} \hspace{0.25em} - \textcolor{mygrey}{\large #2}}%
+    \vspace{-1em}%
+    \markboth{#1}{#2}%
+    \autoscaleheader{{#1 \quad - \quad #2}}%
+    \ifnum\value{page}=1\else
+        \fancyhead[C]{\headertext}%
+        \thispagestyle{fancy}%
+    \fi
+}
+\newcommand{\multiheading}{%
+    \@ifnextchar\bgroup
+        {\@multiheadingWithArgs}
+        {\@multiheadingError}
+}
+\newcommand{\@multiheadingWithArgs}[1]{%
+    \@ifnextchar\bgroup
+        {\@multiheadingWithSubtitle{#1}}
+        {\@multiheading{#1}{}{1.0}}%
+}
+\newcommand{\@multiheadingWithSubtitle}[2]{%
+    \@ifnextchar\bgroup
+        {\@multiheadingWithScale{#1}{#2}}
+        {\@multiheading{#1}{#2}{1.0}}%
+}
+\newcommand{\@multiheadingWithScale}[3]{%
+    \@multiheading{#1}{#2}{#3}%
+}
+\newcommand{\@multiheadingError}{%
+    \PackageError{multiheading}{Invalid use of \string\multiheading}{Expected two or three arguments.}%
+}
+\makeatother

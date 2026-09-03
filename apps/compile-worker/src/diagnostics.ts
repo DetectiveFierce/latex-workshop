@@ -11,7 +11,7 @@ export function parseLatexDiagnostics(log: string): Diagnostic[] {
       add({
         severity: /warning/i.test(fileLine[3]!) ? 'warning' : 'error',
         file: cleanPath(fileLine[1]!),
-        line: Number(fileLine[2]),
+        line: positiveInteger(fileLine[2]),
         column: null,
         message: fileLine[3]!.trim(),
         source: 'latex',
@@ -26,7 +26,7 @@ export function parseLatexDiagnostics(log: string): Diagnostic[] {
       add({
         severity: 'error',
         file: null,
-        line: location ? Number(location[1]) : null,
+        line: positiveInteger(location?.[1]),
         column: null,
         message: line.slice(2).trim(),
         source: 'latex',
@@ -40,7 +40,7 @@ export function parseLatexDiagnostics(log: string): Diagnostic[] {
       add({
         severity: 'warning',
         file: null,
-        line: warning[2] ? Number(warning[2]) : null,
+        line: positiveInteger(warning[2]),
         column: null,
         message: warning[1]!.trim(),
         source: 'latex',
@@ -59,4 +59,10 @@ export function parseLatexDiagnostics(log: string): Diagnostic[] {
 
 function cleanPath(path: string) {
   return path.replace(/^.*?\/workspace\//, '').replace(/^\.\//, '');
+}
+
+function positiveInteger(value: string | undefined): number | null {
+  if (!value || value.length > 15) return null;
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
 }

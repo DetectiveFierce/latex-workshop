@@ -1,0 +1,42 @@
+\documentclass{article}
+
+\input{lib/in_header}
+
+\renewcommand{\mytitle}{LaTeX Template}
+\renewcommand{\myauthor}{Annie Lytics}
+
+\begin{document}
+
+\thispagestyle{firstpage}
+\UNsection{\mytitle}{1.5}
+
+This is a pure LaTeX starter document that keeps the visual styling from the
+R Markdown template while removing YAML, knitr setup chunks, and R package
+imports.
+
+\UNsubsection{Code}
+\mbox{}\par\medskip
+
+\begin{lstlisting}[language=Python]
+def summarize(values):
+    # Regular LaTeX listings replace knitr code chunks.
+    total = sum(values)
+    return total / len(values)
+\end{lstlisting}
+
+\UNsubsection{Math}
+\mbox{}\par\medskip
+
+\begin{UNequation}
+  \mathbox{mygreen}{E = mc^2}
+\end{UNequation}
+
+\begin{proofline}
+  This is a proof line.
+
+  \begin{proofline}
+  This is a nested proof line.
+  \end{proofline}
+\end{proofline}
+
+\end{document}

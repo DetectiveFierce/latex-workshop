@@ -33,6 +33,7 @@ import {
   Import,
   Images,
   List,
+  LayoutTemplate,
   Menu,
   MoreHorizontal,
   Pencil,
@@ -53,6 +54,8 @@ import type {
   Project,
   ProjectTag,
   TagColor,
+  TemplateListResponse,
+  TemplateSummary,
 } from '@latex-workshop/contracts';
 import { AppearanceMenu } from '../components/AppearanceMenu';
 import { Button, IconButton } from '../components/Button';
@@ -65,7 +68,7 @@ import { api, appPath, queryKeys, uploadForm } from '../lib/api';
 import { authClient } from '../lib/auth';
 import { classNames, formatRelative } from '../lib/utils';
 
-type View = 'all' | 'recent' | 'favorites' | 'folder' | 'tag' | 'trash';
+type View = 'all' | 'recent' | 'favorites' | 'templates' | 'folder' | 'tag' | 'trash';
 type Sort = 'updated-desc' | 'updated-asc' | 'created-desc' | 'name-asc' | 'name-desc';
 type Layout = 'grid' | 'list';
 type ImportProgressState = {
@@ -88,7 +91,7 @@ type RouteUpdate = Partial<{
   sort: Sort | undefined;
 }>;
 type Modal =
-  | { type: 'create-project' }
+  | { type: 'create-project'; initialTemplateId?: string }
   | { type: 'folder'; folder?: LibraryFolder; parentId: string | null }
   | { type: 'move-projects'; projectIds: string[] }
   | { type: 'move-folder'; folder: LibraryFolder }
@@ -166,7 +169,25 @@ export function DashboardPage() {
     queryFn: () => api<LibraryResponse>(`/api/v1/library?trash=${trash}`),
     enabled: Boolean(session?.user),
   });
+  const templates = useQuery({
+    queryKey: queryKeys.templates,
+    queryFn: () => api<TemplateListResponse>('/api/v1/templates'),
+    enabled: Boolean(session?.user),
+  });
   const data = library.data;
+  const templateProjects = useMemo(
+    () => (templates.data?.templates ?? []).map(asLibraryProject),
+    [templates.data?.templates],
+  );
+  const starterTemplateIds = useMemo(
+    () =>
+      new Set(
+        (templates.data?.templates ?? [])
+          .filter((template) => template.isStarter)
+          .map((template) => template.id),
+      ),
+    [templates.data?.templates],
+  );
   const activeFolders = useMemo(
     () => (data?.folders ?? []).filter((folder) => !folder.trashedAt),
     [data?.folders],
@@ -210,7 +231,7 @@ export function DashboardPage() {
   }, [currentFolder]);
 
   const displayedProjects = useMemo(() => {
-    let result = [...(data?.projects ?? [])];
+    let result = [...(view === 'templates' ? templateProjects : (data?.projects ?? []))];
     if (view === 'trash') result = result.filter((project) => !project.trashedByFolderId);
     const normalized = query.trim().toLocaleLowerCase();
     if (normalized) {
@@ -224,14 +245,19 @@ export function DashboardPage() {
           .toLocaleLowerCase()
           .includes(normalized),
       );
+    } else if (view === 'templates') {
+      // The templates endpoint has already limited this collection to active templates.
     } else if (view === 'all') {
       result = result.filter((project) => !project.folderId);
     } else if (view === 'recent') {
       return result
-        .filter((project) => project.lastOpenedAt)
+        .filter(
+          (project): project is LibraryProject & { lastOpenedAt: string } =>
+            project.lastOpenedAt !== null,
+        )
         .sort(
           (left, right) =>
-            new Date(right.lastOpenedAt!).getTime() - new Date(left.lastOpenedAt!).getTime(),
+            new Date(right.lastOpenedAt).getTime() - new Date(left.lastOpenedAt).getTime(),
         )
         .slice(0, 20);
     } else if (view === 'favorites') {
@@ -242,10 +268,20 @@ export function DashboardPage() {
       result = result.filter((project) => project.tags.some((tag) => tag.id === currentTag?.id));
     }
     return result.sort((left, right) => compareProjects(left, right, sort));
-  }, [data?.projects, query, view, currentFolder?.id, currentTag?.id, folderPath, sort]);
+  }, [
+    data?.projects,
+    templateProjects,
+    query,
+    view,
+    currentFolder?.id,
+    currentTag?.id,
+    folderPath,
+    sort,
+  ]);
 
   const displayedFolders = useMemo(() => {
     if (!data) return [];
+    if (view === 'templates') return [];
     if (query) {
       const normalized = query.trim().toLocaleLowerCase();
       return (trash ? trashedFolders : activeFolders).filter((folder) =>
@@ -267,7 +303,12 @@ export function DashboardPage() {
     ? []
     : (data?.projects ?? []).filter((project) => project.mainFileId);
 
-  const refresh = () => queryClient.invalidateQueries({ queryKey: ['library'] });
+  const refresh = async () => {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['library'] }),
+      queryClient.invalidateQueries({ queryKey: queryKeys.templates }),
+    ]);
+  };
   const action = useMutation({
     mutationFn: (input: Record<string, unknown>) =>
       api<{ updated: number }>('/api/v1/library/projects/actions', {
@@ -594,11 +635,13 @@ export function DashboardPage() {
         ? (currentTag?.name ?? 'Tag')
         : view === 'favorites'
           ? 'Favorites'
-          : view === 'recent'
-            ? 'Recent'
-            : view === 'trash'
-              ? 'Trash'
-              : 'Library';
+          : view === 'templates'
+            ? 'Templates'
+            : view === 'recent'
+              ? 'Recent'
+              : view === 'trash'
+                ? 'Trash'
+                : 'Library';
 
   return (
     <DndContext
@@ -652,6 +695,12 @@ export function DashboardPage() {
               active={view === 'favorites'}
               label="Favorites"
               onClick={() => openView('favorites')}
+            />
+            <SidebarItem
+              icon={<LayoutTemplate size={16} />}
+              active={view === 'templates'}
+              label="Templates"
+              onClick={() => openView('templates')}
             />
             <RootDropItem active={view === 'all'} onClick={() => openView('all')} />
           </nav>
@@ -835,7 +884,7 @@ export function DashboardPage() {
             </div>
           </div>
 
-          {selection.size > 0 && !trash && (
+          {selection.size > 0 && !trash && view !== 'templates' && (
             <BulkBar
               count={selection.size}
               allSelected={selection.size === displayedProjects.length}
@@ -856,14 +905,26 @@ export function DashboardPage() {
             />
           )}
 
-          {library.isPending ? (
+          {library.isPending || (view === 'templates' && templates.isPending) ? (
             <LibrarySkeleton layout={layout} />
-          ) : library.isError ? (
+          ) : library.isError || (view === 'templates' && templates.isError) ? (
             <LibraryEmpty
-              icon={<FileCode2 size={38} />}
-              title="Couldn’t load the library"
-              description={library.error.message}
-              action={<Button onClick={() => void library.refetch()}>Try again</Button>}
+              icon={view === 'templates' ? <LayoutTemplate size={38} /> : <FileCode2 size={38} />}
+              title={view === 'templates' ? 'Couldn’t load templates' : 'Couldn’t load the library'}
+              description={
+                view === 'templates' && templates.isError
+                  ? templates.error.message
+                  : (library.error?.message ?? 'The library could not be loaded.')
+              }
+              action={
+                <Button
+                  onClick={() =>
+                    void (view === 'templates' ? templates.refetch() : library.refetch())
+                  }
+                >
+                  Try again
+                </Button>
+              }
             />
           ) : displayedFolders.length || displayedProjects.length ? (
             <>
@@ -914,6 +975,8 @@ export function DashboardPage() {
                       selected={selection.has(project.id)}
                       location={folderPath.get(project.folderId ?? '') ?? 'Library root'}
                       thumbnailGeneration={thumbnailGeneration}
+                      templateView={view === 'templates'}
+                      isStarter={starterTemplateIds.has(project.id)}
                       onSelect={(shift) => toggleSelection(project.id, shift)}
                       onFavorite={() =>
                         action.mutate({
@@ -926,6 +989,16 @@ export function DashboardPage() {
                       onDuplicate={() =>
                         projectMutation.mutate({
                           path: `/api/v1/projects/${project.id}/duplicate`,
+                        })
+                      }
+                      onUseTemplate={() =>
+                        setModal({ type: 'create-project', initialTemplateId: project.id })
+                      }
+                      onToggleTemplate={() =>
+                        projectMutation.mutate({
+                          path: `/api/v1/projects/${project.id}`,
+                          method: 'PATCH',
+                          body: { isTemplate: !project.isTemplate },
                         })
                       }
                       onMove={() => setModal({ type: 'move-projects', projectIds: [project.id] })}
@@ -945,6 +1018,8 @@ export function DashboardPage() {
               icon={
                 trash ? (
                   <Trash2 size={38} />
+                ) : view === 'templates' ? (
+                  <LayoutTemplate size={38} />
                 ) : query ? (
                   <Search size={38} />
                 ) : (
@@ -956,21 +1031,25 @@ export function DashboardPage() {
                   ? 'Trash is empty'
                   : query
                     ? 'No matching projects'
-                    : view === 'favorites'
-                      ? 'No favorites yet'
-                      : view === 'recent'
-                        ? 'No recently opened projects'
-                        : 'Nothing here yet'
+                    : view === 'templates'
+                      ? 'No templates yet'
+                      : view === 'favorites'
+                        ? 'No favorites yet'
+                        : view === 'recent'
+                          ? 'No recently opened projects'
+                          : 'Nothing here yet'
               }
               description={
                 trash
                   ? 'Deleted projects and folders will appear here.'
-                  : query
-                    ? 'Try a different name, folder, or tag.'
-                    : 'Create a project or move one here to get started.'
+                  : view === 'templates'
+                    ? 'Make any project a template from its actions menu.'
+                    : query
+                      ? 'Try a different name, folder, or tag.'
+                      : 'Create a project or move one here to get started.'
               }
               action={
-                !trash && !query ? (
+                !trash && !query && view !== 'templates' ? (
                   <Button variant="primary" onClick={() => setModal({ type: 'create-project' })}>
                     New project
                   </Button>
@@ -993,11 +1072,16 @@ export function DashboardPage() {
         <ProjectCreateDialog
           destination={currentFolder}
           pending={projectMutation.isPending}
+          templates={templates.data?.templates ?? []}
+          templatesPending={templates.isPending}
+          templatesError={templates.isError ? templates.error.message : null}
+          initialTemplateId={modal.initialTemplateId ?? null}
+          onRetryTemplates={() => void templates.refetch()}
           onClose={() => setModal(null)}
-          onCreate={async (name) => {
+          onCreate={async (name, templateProjectId) => {
             const { project } = await projectMutation.mutateAsync({
               path: '/api/v1/projects',
-              body: { name, folderId: currentFolder?.id ?? null },
+              body: { name, folderId: currentFolder?.id ?? null, templateProjectId },
             });
             setModal(null);
             await navigate({ to: '/projects/$projectId', params: { projectId: project.id } });
@@ -1494,10 +1578,14 @@ function ProjectItem(props: {
   selected: boolean;
   location: string;
   thumbnailGeneration: number;
+  templateView: boolean;
+  isStarter: boolean;
   onSelect: (shift: boolean) => void;
   onFavorite: () => void;
   onRename: () => void;
   onDuplicate: () => void;
+  onUseTemplate: () => void;
+  onToggleTemplate: () => void;
   onMove: () => void;
   onTags: () => void;
   onTrash: () => void;
@@ -1530,19 +1618,21 @@ function ProjectItem(props: {
           generate={props.thumbnailGeneration}
         />
       )}
-      <div className="project-select-cell">
-        <input
-          type="checkbox"
-          aria-label={`Select ${project.name}`}
-          checked={selected}
-          onChange={() => undefined}
-          onClick={(event) => {
-            event.stopPropagation();
-            props.onSelect(event.shiftKey);
-          }}
-        />
-      </div>
-      {!trash && (
+      {!props.templateView && (
+        <div className="project-select-cell">
+          <input
+            type="checkbox"
+            aria-label={`Select ${project.name}`}
+            checked={selected}
+            onChange={() => undefined}
+            onClick={(event) => {
+              event.stopPropagation();
+              props.onSelect(event.shiftKey);
+            }}
+          />
+        </div>
+      )}
+      {!trash && !props.templateView && (
         <button
           className={classNames('project-favorite', project.favorite && 'active')}
           aria-label={
@@ -1567,6 +1657,11 @@ function ProjectItem(props: {
         {layout === 'list' && <FileCode2 size={17} />}
         <div>
           <h2>{project.name}</h2>
+          {props.templateView && (
+            <span className="template-label">
+              {props.isStarter ? 'Starter template' : 'Template'}
+            </span>
+          )}
           {layout === 'grid' && <p>Updated {formatRelative(project.updatedAt)}</p>}
         </div>
       </Link>
@@ -1590,7 +1685,7 @@ function ProjectItem(props: {
         </>
       )}
       <span className="project-compiler">{formatCompiler(project.compiler)}</span>
-      {!trash && (
+      {!trash && !props.templateView && (
         <button
           className="project-drag-handle"
           aria-label={`Move ${project.name}`}
@@ -1613,21 +1708,47 @@ function ProjectItem(props: {
             </>
           ) : (
             <>
-              <DropdownItem icon={<Star size={14} />} onSelect={props.onFavorite}>
-                {project.favorite ? 'Remove from favorites' : 'Add to favorites'}
-              </DropdownItem>
+              {props.templateView ? (
+                <>
+                  <DropdownItem icon={<Plus size={14} />} onSelect={props.onUseTemplate}>
+                    Use template
+                  </DropdownItem>
+                  <DropdownItem
+                    icon={<LayoutTemplate size={14} />}
+                    onSelect={props.onToggleTemplate}
+                  >
+                    Remove from templates
+                  </DropdownItem>
+                </>
+              ) : (
+                <>
+                  <DropdownItem icon={<Star size={14} />} onSelect={props.onFavorite}>
+                    {project.favorite ? 'Remove from favorites' : 'Add to favorites'}
+                  </DropdownItem>
+                  <DropdownItem
+                    icon={<LayoutTemplate size={14} />}
+                    onSelect={props.onToggleTemplate}
+                  >
+                    Make template
+                  </DropdownItem>
+                </>
+              )}
               <DropdownItem icon={<Pencil size={14} />} onSelect={props.onRename}>
                 Rename
               </DropdownItem>
               <DropdownItem icon={<Copy size={14} />} onSelect={props.onDuplicate}>
                 Duplicate
               </DropdownItem>
-              <DropdownItem icon={<FolderInput size={14} />} onSelect={props.onMove}>
-                Move
-              </DropdownItem>
-              <DropdownItem icon={<Tags size={14} />} onSelect={props.onTags}>
-                Manage tags
-              </DropdownItem>
+              {!props.templateView && (
+                <>
+                  <DropdownItem icon={<FolderInput size={14} />} onSelect={props.onMove}>
+                    Move
+                  </DropdownItem>
+                  <DropdownItem icon={<Tags size={14} />} onSelect={props.onTags}>
+                    Manage tags
+                  </DropdownItem>
+                </>
+              )}
               <DropdownMenu.Item className="dropdown-item" asChild>
                 <a href={appPath(`/api/v1/projects/${project.id}/export`)} download>
                   <Download size={14} /> Export ZIP
@@ -1694,7 +1815,7 @@ function Breadcrumbs({
 
 function ItemMenu({ label, children }: { label: string; children: ReactNode }) {
   return (
-    <DropdownMenu.Root modal>
+    <DropdownMenu.Root modal={false}>
       <DropdownMenu.Trigger asChild>
         <IconButton label={label}>
           <MoreHorizontal size={17} />
@@ -1869,20 +1990,33 @@ function BulkBar({
 function ProjectCreateDialog({
   destination,
   pending,
+  templates,
+  templatesPending,
+  templatesError,
+  initialTemplateId,
+  onRetryTemplates,
   onClose,
   onCreate,
 }: {
   destination: LibraryFolder | null;
   pending: boolean;
+  templates: TemplateSummary[];
+  templatesPending: boolean;
+  templatesError: string | null;
+  initialTemplateId: string | null;
+  onRetryTemplates: () => void;
   onClose: () => void;
-  onCreate: (name: string) => Promise<void>;
+  onCreate: (name: string, templateProjectId: string | null) => Promise<void>;
 }) {
   const [name, setName] = useState('Untitled project');
+  const [templateProjectId, setTemplateProjectId] = useState<string | null>(initialTemplateId);
+  const [error, setError] = useState<string | null>(null);
   return (
     <Dialog
       open
       onOpenChange={(open) => !open && onClose()}
       title="Create project"
+      wide
       description={
         destination
           ? `The project will be created in ${destination.name}.`
@@ -1893,7 +2027,10 @@ function ProjectCreateDialog({
         className="dialog-form"
         onSubmit={(event) => {
           event.preventDefault();
-          void onCreate(name);
+          setError(null);
+          void onCreate(name, templateProjectId).catch((cause) =>
+            setError(cause instanceof Error ? cause.message : 'Unable to create project'),
+          );
         }}
       >
         <label className="field">
@@ -1907,6 +2044,74 @@ function ProjectCreateDialog({
             required
           />
         </label>
+        <fieldset className="template-picker" disabled={pending}>
+          <legend>Start from</legend>
+          <div className="template-options" role="radiogroup" aria-label="Project starting point">
+            <label
+              className={classNames('template-option', templateProjectId === null && 'selected')}
+            >
+              <input
+                type="radio"
+                name="project-template"
+                checked={templateProjectId === null}
+                onChange={() => setTemplateProjectId(null)}
+              />
+              <FileCode2 size={22} />
+              <span>
+                <strong>Blank project</strong>
+                <small>A clean main.tex document</small>
+              </span>
+            </label>
+            {templates.map((template) => (
+              <label
+                key={template.id}
+                className={classNames(
+                  'template-option',
+                  templateProjectId === template.id && 'selected',
+                )}
+              >
+                <input
+                  type="radio"
+                  name="project-template"
+                  checked={templateProjectId === template.id}
+                  onChange={() => setTemplateProjectId(template.id)}
+                />
+                <LayoutTemplate size={22} />
+                <span>
+                  <strong>
+                    {template.name}
+                    {template.isStarter && <em>Starter</em>}
+                  </strong>
+                  <small>
+                    {formatCompiler(template.compiler)} · Updated{' '}
+                    {formatRelative(template.updatedAt)}
+                  </small>
+                </span>
+              </label>
+            ))}
+          </div>
+          {templatesPending && (
+            <p className="hint" role="status">
+              Loading templates…
+            </p>
+          )}
+          {templatesError && (
+            <div className="template-picker-error" role="alert">
+              <span>{templatesError}</span>
+              <Button type="button" onClick={onRetryTemplates}>
+                Try again
+              </Button>
+            </div>
+          )}
+          {!templatesPending && !templatesError && templates.length === 0 && (
+            <p className="hint">No templates yet. Use a project’s actions menu to make one.</p>
+          )}
+        </fieldset>
+        {error && (
+          <p className="form-error" role="alert">
+            {error}
+          </p>
+        )}
         <div className="dialog-actions">
           <Button type="button" onClick={onClose}>
             Cancel
@@ -2506,6 +2711,17 @@ function compareProjects(left: LibraryProject, right: LibraryProject, sort: Sort
     return new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime();
   const delta = new Date(left.updatedAt).getTime() - new Date(right.updatedAt).getTime();
   return sort === 'updated-asc' ? delta : -delta;
+}
+
+function asLibraryProject(template: TemplateSummary): LibraryProject {
+  return {
+    ...template,
+    folderId: null,
+    favorite: false,
+    lastOpenedAt: null,
+    trashedByFolderId: null,
+    tags: [],
+  };
 }
 
 async function waitForCompilation(projectId: string, initial: CompileJob) {

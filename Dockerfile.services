@@ -2,9 +2,25 @@ FROM node:24-bookworm-slim@sha256:ba849c60be29959425b8734d57b8b4b7d56f98edd9504c
 RUN corepack enable
 WORKDIR /app
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml turbo.json tsconfig.base.json eslint.config.mjs .prettierrc.json ./
-COPY apps ./apps
-COPY packages ./packages
-RUN pnpm install --frozen-lockfile && pnpm build
+COPY apps/api/package.json ./apps/api/package.json
+COPY apps/compile-worker/package.json ./apps/compile-worker/package.json
+COPY apps/language-service/package.json ./apps/language-service/package.json
+COPY packages/config/package.json ./packages/config/package.json
+COPY packages/contracts/package.json ./packages/contracts/package.json
+COPY packages/db/package.json ./packages/db/package.json
+COPY packages/storage/package.json ./packages/storage/package.json
+RUN pnpm install --frozen-lockfile
+COPY apps/api ./apps/api
+COPY apps/compile-worker ./apps/compile-worker
+COPY apps/language-service ./apps/language-service
+COPY packages/config ./packages/config
+COPY packages/contracts ./packages/contracts
+COPY packages/db ./packages/db
+COPY packages/storage ./packages/storage
+RUN pnpm exec turbo run build \
+  --filter=@latex-workshop/api \
+  --filter=@latex-workshop/compile-worker \
+  --filter=@latex-workshop/language-service
 
 FROM node:24-bookworm-slim@sha256:ba849c60be29959425b8734d57b8b4b7d56f98edd9504c9af091d5281095a71e AS runtime
 ARG TEXLAB_VERSION=5.25.1

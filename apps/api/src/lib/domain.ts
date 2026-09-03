@@ -9,13 +9,15 @@ import {
   libraryFolders,
   projectMemberships,
   projects,
+  userTemplateSeeds,
   type CheckpointManifestEntry,
 } from '@latex-workshop/db';
 import type { ObjectStorage } from '@latex-workshop/storage';
-import { forbidden, notFound } from './errors.js';
-import { quotaExceeded } from './errors.js';
+import { forbidden, notFound, quotaExceeded } from './errors.js';
 import type { AppConfig } from '@latex-workshop/config';
-import { mergeText } from '@latex-workshop/contracts';
+import { buildEntryPaths, mergeText } from '@latex-workshop/contracts';
+
+export { buildEntryPaths } from '@latex-workshop/contracts';
 
 export function sha256(value: Uint8Array | string) {
   return createHash('sha256').update(value).digest('hex');
@@ -47,29 +49,6 @@ export async function requireLibraryFolder(db: Database, userId: string, folderI
     .limit(1);
   if (!folder) throw notFound('Folder not found');
   return folder;
-}
-
-export function buildEntryPaths(rows: Array<typeof entries.$inferSelect>) {
-  const byId = new Map(rows.map((entry) => [entry.id, entry]));
-  const cache = new Map<string, string>();
-  const visit = (entry: typeof entries.$inferSelect, seen = new Set<string>()): string => {
-    const cached = cache.get(entry.id);
-    if (cached) return cached;
-    if (seen.has(entry.id)) throw new Error('Folder cycle detected');
-    seen.add(entry.id);
-    const path = entry.parentId
-      ? `${visit(
-          byId.get(entry.parentId) ??
-            (() => {
-              throw new Error('Missing parent');
-            })(),
-          seen,
-        )}/${entry.name}`
-      : entry.name;
-    cache.set(entry.id, path);
-    return path;
-  };
-  return new Map(rows.map((entry) => [entry.id, visit(entry)]));
 }
 
 export async function storeFileVersion(
@@ -297,7 +276,7 @@ export async function getFileWithBlob(db: Database, projectId: string, entryId: 
 }
 
 export async function assertStorageQuota(
-  db: Database,
+  db: Database | DatabaseTransaction,
   config: AppConfig,
   userId: string,
   projectId: string,
@@ -313,7 +292,8 @@ export async function assertStorageQuota(
     .select({ bytes: sql<number>`coalesce(sum(${entries.size}), 0)::bigint` })
     .from(entries)
     .innerJoin(projectMemberships, eq(projectMemberships.projectId, entries.projectId))
-    .where(eq(projectMemberships.userId, userId));
+    .leftJoin(userTemplateSeeds, eq(userTemplateSeeds.projectId, entries.projectId))
+    .where(and(eq(projectMemberships.userId, userId), isNull(userTemplateSeeds.projectId)));
   if (Number(userUsage?.bytes ?? 0) + deltaBytes > config.MAX_USER_BYTES)
     throw quotaExceeded('Account storage limit reached');
 }

@@ -157,6 +157,7 @@ export function rankSyncRecords(
   records: SyncTexRecord[],
   input: { path: string; line: number; pageHint?: number; selectedText?: string },
 ) {
+  const selectedText = input.selectedText;
   return records
     .map((record, order) => {
       let score = -order;
@@ -164,10 +165,8 @@ export function rankSyncRecords(
       if (input.pageHint && record.page === input.pageHint) score += 300;
       if (record.line !== null) score += Math.max(0, 200 - Math.abs(record.line - input.line));
       if (
-        input.selectedText &&
-        [record.before, record.middle, record.after].some((value) =>
-          value?.includes(input.selectedText!),
-        )
+        selectedText &&
+        [record.before, record.middle, record.after].some((value) => value?.includes(selectedText))
       )
         score += 150;
       return { record, score, order };

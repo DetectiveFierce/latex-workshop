@@ -3,7 +3,7 @@ import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import type { AppConfig } from '@latex-workshop/config';
-import type { CompilerEngine } from '@latex-workshop/contracts';
+import { normalizeArchivePath, type CompilerEngine } from '@latex-workshop/contracts';
 
 export type RunnerResult = {
   exitCode: number;
@@ -39,7 +39,7 @@ export class DockerCompilationRunner implements CompilationRunner {
     const containerName = `latex-workshop-${input.jobId}`;
     try {
       for (const file of input.files) {
-        const target = join(workspace, file.path);
+        const target = join(workspace, normalizeArchivePath(file.path));
         await mkdir(dirname(target), { recursive: true });
         await writeFile(target, file.data);
       }
@@ -54,6 +54,7 @@ export class DockerCompilationRunner implements CompilationRunner {
             : '-lualatex';
       const uid = typeof process.getuid === 'function' ? process.getuid() : 10001;
       const gid = typeof process.getgid === 'function' ? process.getgid() : 10001;
+      const mainPath = normalizeArchivePath(input.mainPath);
       const args = [
         'run',
         '--rm',
@@ -104,7 +105,7 @@ export class DockerCompilationRunner implements CompilationRunner {
         '$xelatex=q/xelatex -no-shell-escape %O %S/',
         '-e',
         '$lualatex=q/lualatex -no-shell-escape %O %S/',
-        input.mainPath,
+        `./${mainPath}`,
       ];
       const child = spawn('docker', args, { stdio: ['ignore', 'pipe', 'pipe'] });
       let log = '';

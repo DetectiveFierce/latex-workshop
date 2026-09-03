@@ -158,10 +158,14 @@ export const projects = pgTable(
     mainFileId: uuid('main_file_id'),
     autoCompile: boolean('auto_compile').notNull().default(false),
     sourceRevision: integer('source_revision').notNull().default(0),
+    isTemplate: boolean('is_template').notNull().default(false),
     trashedAt: timestamp('trashed_at', { withTimezone: true }),
     ...timestamps,
   },
-  (table) => [index('projects_trash_idx').on(table.trashedAt)],
+  (table) => [
+    index('projects_trash_idx').on(table.trashedAt),
+    index('projects_template_trash_idx').on(table.isTemplate, table.trashedAt),
+  ],
 );
 
 export const projectMemberships = pgTable(
@@ -186,6 +190,22 @@ export const projectMemberships = pgTable(
     primaryKey({ columns: [table.projectId, table.userId] }),
     index('memberships_user_idx').on(table.userId),
     index('memberships_folder_idx').on(table.folderId),
+  ],
+);
+
+export const userTemplateSeeds = pgTable(
+  'user_template_seeds',
+  {
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    seedKey: text('seed_key').notNull(),
+    projectId: uuid('project_id').references(() => projects.id, { onDelete: 'set null' }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.userId, table.seedKey] }),
+    uniqueIndex('user_template_seeds_project_idx').on(table.projectId),
   ],
 );
 

@@ -2,7 +2,7 @@
 
 LaTeX Workshop is a private, single-owner browser workspace for editing, compiling, previewing, and versioning LaTeX projects. It ships a Monaco editor backed by isolated TexLab sessions, hardened TeX Live compilation, a PDF.js viewer with SyncTeX, immutable history, safe ZIP transfer, and the Hate of Nature design system.
 
-The product intentionally has no sharing, teams, comments, templates, billing, or Git controls. Membership and runner boundaries are already isolated so those capabilities can be added without weakening tenant authorization or rewriting compilation.
+The product intentionally has no sharing, teams, comments, billing, or Git controls. Membership and runner boundaries are already isolated so those capabilities can be added without weakening tenant authorization or rewriting compilation.
 
 ## Quick start
 
@@ -67,4 +67,21 @@ The E2E suite expects the stack above to be running. Set `E2E_ALL_BROWSERS=true`
 - A failed build never removes the last successful PDF. The preview is marked stale while the new diagnostics and log remain visible.
 - Restoration appends a new head checkpoint; history is never rewritten.
 
+## Project templates
+
+Projects can be marked as live personal templates from their actions menu or Project settings.
+Templates are edited like ordinary projects but appear only in the library's Templates view. New
+projects copy the selected template's current persisted files, compiler, main document, and
+auto-compile setting; the result is independent and is not itself a template.
+
+The first Templates request provisions an editable **Aidan Template** from
+[`DetectiveFierce/tex-template`](https://github.com/DetectiveFierce/tex-template) at commit
+`ec40af3ef128d3950050e39d5a257aa6d8ff9aed`. A seed receipt prevents the starter from being
+recreated after it is unmarked or deleted. The original seeded project is excluded from account
+project-count and byte quotas, while per-file and per-project limits still apply; projects created
+from it use normal quotas. The bundled `.latexmkrc` and `build.sh` remain editable source files, but
+web compilation always uses the hardened `latexmk -norc` runner and never executes project scripts.
+
 See [operations](docs/operations.md) for deployment, migrations, backup, recovery, and scaling, and [security](docs/security.md) for trust boundaries and hardening.
+Automated contributors should also read [AGENTS.md](AGENTS.md) for code-placement rules, invariants,
+implementation preferences, and the required verification gate.

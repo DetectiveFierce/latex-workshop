@@ -28,4 +28,23 @@ describe('mergeText', () => {
       content: null,
     });
   });
+
+  it('is symmetric and total under deterministic fuzzing', () => {
+    let state = 0xdecafbad;
+    const alphabet = ['a', 'b', ' ', '\n', 'λ', '文', '🧪'];
+    const random = () => {
+      state = (Math.imul(state, 1_664_525) + 1_013_904_223) >>> 0;
+      return state;
+    };
+    const text = () =>
+      Array.from({ length: random() % 50 }, () => alphabet[random() % alphabet.length]!).join('');
+
+    for (let run = 0; run < 5_000; run += 1) {
+      const base = text();
+      const local = text();
+      const remote = text();
+      expect(mergeText(base, local, remote)).toEqual(mergeText(base, remote, local));
+      expect(mergeText(base, base, remote)).toEqual({ clean: true, content: remote });
+    }
+  });
 });

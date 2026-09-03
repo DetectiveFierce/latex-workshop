@@ -27,9 +27,15 @@ Use the fast path while iterating on the live development site:
 pnpm deploy:fast
 ```
 
-It skips the local quality suite and backup, builds only the application and web images, and reuses
-the active TeX Live image. It still stages a checksummed, versioned release, runs migrations, waits
-for service health, verifies the deployed image tags, and checks the Tailscale HTTPS endpoint.
+It skips the local quality suite, backup, TeX Live build, and builder-cache pruning. The application
+and web images build concurrently, and the active TeX Live image is reused. It still stages a
+checksummed, versioned release, runs migrations, waits for service health, verifies the deployed
+image tags, and checks the Tailscale HTTPS endpoint.
+
+Both application Dockerfiles install dependencies from workspace manifests before copying source,
+so ordinary code-only releases reuse the dependency layer. The services image builds only API,
+worker, language-service, and their shared-package dependency graph; the web app is built once in
+its own image.
 
 Use the guarded path for a production release:
 
@@ -37,12 +43,18 @@ Use the guarded path for a production release:
 pnpm deploy:production
 ```
 
-It runs formatting, lint, type checking, unit/integration tests, production builds, and Playwright;
-builds all immutable images; and creates a consistent backup of the live PostgreSQL database and
-object bucket immediately before activation and migration. `pnpm deploy:mind-palace` remains an
-alias for this production path. Add `-- --dry-run` to either command to preview the transfer. If the
-local E2E stack is intentionally unavailable, `-- --skip-e2e` bypasses Playwright. The SSH host and
-remote root can be overridden with `LATEX_DEPLOY_HOST` and `LATEX_WORKSHOP_ROOT`.
+It runs the dependency audit, release gate, Playwright suite, and remote preflight concurrently;
+builds all three immutable images concurrently; and creates a consistent backup of the live
+PostgreSQL database and object bucket immediately before activation and migration. The database and
+object snapshots run in parallel while writers are stopped, reducing the read-only window. A single
+source manifest both names the release and verifies the transfer, and Compose's health wait is the
+authoritative internal health check. Old releases are retained as before, while builder-cache
+pruning happens asynchronously after a successful production activation.
+
+`pnpm deploy:mind-palace` remains an alias for this production path. Add `-- --dry-run` to either
+command to preview the transfer. If the local E2E stack is intentionally unavailable,
+`-- --skip-e2e` bypasses Playwright. The SSH host and remote root can be overridden with
+`LATEX_DEPLOY_HOST` and `LATEX_WORKSHOP_ROOT`.
 
 The pipeline automatically restores the previous release if activation fails before migrations
 start. It deliberately does not roll application images backward after a migration begins because

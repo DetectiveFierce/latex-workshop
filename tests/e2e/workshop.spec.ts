@@ -84,7 +84,8 @@ test('verified user creates, edits, persists, and compiles a project', async ({
   await page.keyboard.press('Enter');
   await expect(accountSettings).toBeVisible();
   await page.getByRole('button', { name: 'Reset all' }).click();
-  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  const saveResetShortcuts = page.getByRole('button', { name: 'Save', exact: true });
+  if (await saveResetShortcuts.isEnabled()) await saveResetShortcuts.click();
   await accountSettings.getByRole('button', { name: 'Close' }).click();
   await expect(page).toHaveTitle('main.tex — Editor | LaTeX Workshop');
   await expect(page.locator('.monaco-editor')).toBeVisible();
@@ -329,6 +330,29 @@ test('library organizes projects with folders, tags, views, bulk actions, and re
   await page.getByLabel('Password').fill(password);
   await page.getByRole('button', { name: 'Sign in' }).click();
   await expect(page.getByRole('heading', { name: 'Library' })).toBeVisible();
+
+  await page.getByRole('button', { name: 'Templates' }).click();
+  await expect(page.getByRole('heading', { name: 'Templates' })).toBeVisible();
+  await expect(page.getByText('Aidan Template', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Aidan Template actions' }).click();
+  await page.getByRole('menuitem', { name: 'Use template' }).click();
+  await expect(page.getByRole('radio', { name: /Aidan Template/ })).toBeChecked();
+  await page.getByLabel('Project name').fill('From Aidan');
+  await page.getByRole('button', { name: 'Create project' }).click();
+  await expect(page).toHaveTitle('template.tex — Editor | LaTeX Workshop');
+  await expect(page.getByText('Template', { exact: true })).toHaveCount(0);
+  await page.getByLabel('Back to projects').click();
+  await expect(page.getByText('From Aidan', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'From Aidan actions' }).click();
+  await page.getByRole('menuitem', { name: 'Make template' }).click();
+  await expect(page.getByText('From Aidan', { exact: true })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Templates' }).click();
+  await expect(page.getByText('From Aidan', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'From Aidan actions' }).click();
+  await page.getByRole('menuitem', { name: 'Remove from templates' }).click();
+  await expect(page.getByText('From Aidan', { exact: true })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Library', exact: true }).click();
+  await expect(page.getByText('From Aidan', { exact: true })).toBeVisible();
 
   await page.getByRole('button', { name: 'New', exact: true }).click();
   await page.getByRole('menuitem', { name: 'New folder' }).click();

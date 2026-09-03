@@ -12,5 +12,7 @@ describe('OpenAPI contract', () => {
     expect(document.paths['/api/v1/projects/{projectId}/compilations/{jobId}/pdf']).toBeDefined();
     expect(document.components.schemas.ApiError).toBeDefined();
     expect(document.components.schemas.LibraryResponse).toBeDefined();
+    expect(document.components.schemas.TemplateListResponse).toBeDefined();
+    expect(document.paths['/api/v1/templates']).toBeDefined();
   });
 });

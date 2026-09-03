@@ -30,20 +30,9 @@ jobs:
         with: { node-version: 24, cache: pnpm }
       - run: corepack enable && corepack prepare pnpm@10.15.0 --activate
       - run: pnpm install --frozen-lockfile
-      - run: pnpm format:check
-      - run: pnpm lint
-      - run: pnpm typecheck
-      - run: pnpm test
+      - run: pnpm security:audit
+      - run: pnpm check
       - run: pnpm db:migrate
-      - run: pnpm build
-
-  containers:
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v4
-      - run: docker build --target runtime -f Dockerfile.services .
-      - run: docker build -f apps/web/Dockerfile .
-      - run: docker build -f infra/texlive/Dockerfile infra/texlive
 
   e2e:
     runs-on: ubuntu-24.04

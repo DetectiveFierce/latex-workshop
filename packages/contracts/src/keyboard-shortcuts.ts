@@ -578,6 +578,7 @@ export const keyboardShortcutsResponseSchema = z.object({
   overrides: keyboardShortcutProfilesSchema,
   updatedAt: z.iso.datetime().nullable(),
 });
+export type KeyboardShortcutsResponse = z.infer<typeof keyboardShortcutsResponseSchema>;
 
 export function migrateLegacyShortcutOverrides(value: unknown): KeyboardShortcutProfiles {
   const profiles = keyboardShortcutProfilesSchema.safeParse(value);

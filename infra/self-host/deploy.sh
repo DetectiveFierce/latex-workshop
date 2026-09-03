@@ -89,8 +89,15 @@ done
 repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 cd "$repo_root"
 
-source_digest() {
+if [[ -n $release_id && ! $release_id =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$ ]]; then
+  echo "Release ID contains unsupported characters: $release_id" >&2
+  exit 2
+fi
+
+write_source_manifest() {
+  local destination=$1
   find . -type f \
+    ! -path './.git/*' \
     ! -path '*/node_modules/*' \
     ! -path '*/.turbo/*' \
     ! -path '*/dist/*' \
@@ -104,24 +111,40 @@ source_digest() {
     ! -name 'SHA256SUMS' \
     -print0 |
     LC_ALL=C sort -z |
-    xargs -0 sha256sum |
-    sha256sum |
-    cut -c1-12
+    xargs -0 sha256sum >"$destination"
 }
 
-if [[ -z $release_id ]]; then
-  release_id="$(date -u +%Y%m%dT%H%M%SZ)-$(source_digest)"
-fi
-if [[ ! $release_id =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$ ]]; then
-  echo "Release ID contains unsupported characters: $release_id" >&2
-  exit 2
-fi
+task_pids=()
+task_names=()
+start_local_task() {
+  local name=$1
+  shift
+  echo "Starting $name..."
+  "$@" &
+  task_pids+=("$!")
+  task_names+=("$name")
+}
 
-echo "Release: $release_id"
+wait_for_local_tasks() {
+  local failed=false
+  local index
+  for index in "${!task_pids[@]}"; do
+    if wait "${task_pids[$index]}"; then
+      echo "Completed ${task_names[$index]}"
+    else
+      echo "Failed ${task_names[$index]}" >&2
+      failed=true
+    fi
+  done
+  task_pids=()
+  task_names=()
+  [[ $failed == false ]]
+}
+
 echo "Target:  $target_host:$deploy_root"
 echo "Mode:    $deployment_mode"
 
-ssh -o BatchMode=yes "$target_host" bash -s -- "$deploy_root" <<'REMOTE_PREFLIGHT'
+ssh -o BatchMode=yes "$target_host" bash -s -- "$deploy_root" <<'REMOTE_PREFLIGHT' &
 set -Eeuo pipefail
 deploy_root=$1
 for command_name in docker curl flock sha256sum; do
@@ -134,29 +157,48 @@ docker compose version >/dev/null
 test -d "$deploy_root/releases"
 test -f "$deploy_root/.env"
 REMOTE_PREFLIGHT
+task_pids+=("$!")
+task_names+=('remote preflight')
 
 if [[ $deployment_mode == production ]]; then
-  echo 'Running local release checks...'
-  pnpm format:check
-  pnpm lint
-  pnpm typecheck
-  pnpm test
-  pnpm build
+  echo 'Running independent local release checks in parallel...'
+  start_local_task 'dependency audit' pnpm security:audit
+  start_local_task 'release gate' pnpm check
   if [[ $with_e2e == true ]]; then
-    pnpm test:e2e
+    start_local_task 'browser end-to-end tests' pnpm test:e2e
   fi
 fi
+wait_for_local_tasks
+
+manifest_dir=$(mktemp -d)
+source_manifest=$manifest_dir/SHA256SUMS
+incoming_created=false
+incoming_dir=''
+cleanup_local() {
+  rm -rf -- "$manifest_dir"
+  if [[ $incoming_created == true ]]; then
+    ssh "$target_host" rm -rf -- "$incoming_dir" >/dev/null 2>&1 || true
+  fi
+}
+trap cleanup_local EXIT
+
+write_source_manifest "$source_manifest"
+source_digest=$(sha256sum "$source_manifest" | cut -c1-12)
+if [[ -z $release_id ]]; then
+  release_id="$(date -u +%Y%m%dT%H%M%SZ)-$source_digest"
+fi
+if [[ ! $release_id =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$ ]]; then
+  echo "Release ID contains unsupported characters: $release_id" >&2
+  exit 2
+fi
+echo "Release: $release_id (source $source_digest)"
 
 incoming_dir="$deploy_root/releases/.incoming-$release_id"
 release_dir="$deploy_root/releases/$release_id"
-cleanup_incoming() {
-  ssh "$target_host" rm -rf -- "$incoming_dir" >/dev/null 2>&1 || true
-}
-trap cleanup_incoming EXIT
 rsync_options=(
   --archive
-  --checksum
   --delete
+  --exclude .git
   --exclude node_modules
   --exclude dist
   --exclude .turbo
@@ -165,6 +207,7 @@ rsync_options=(
   --exclude coverage
   --exclude .env
   --exclude '*.tsbuildinfo'
+  --exclude SHA256SUMS
   --exclude data
   --exclude tmp
 )
@@ -172,27 +215,20 @@ rsync_options=(
 if [[ $dry_run == true ]]; then
   echo 'Dry run: files that would be transferred:'
   rsync "${rsync_options[@]}" --dry-run --itemize-changes ./ "$target_host:$incoming_dir/"
+  echo 'A generated SHA256SUMS manifest would be transferred and verified.'
   exit 0
 fi
 
 ssh "$target_host" install -d -m 755 "$incoming_dir"
+incoming_created=true
 rsync "${rsync_options[@]}" ./ "$target_host:$incoming_dir/"
+rsync --archive "$source_manifest" "$target_host:$incoming_dir/SHA256SUMS"
 
-local_digest=$(source_digest)
-remote_digest=$(ssh "$target_host" bash -s -- "$incoming_dir" <<'REMOTE_DIGEST'
+ssh "$target_host" bash -s -- "$incoming_dir" <<'REMOTE_DIGEST'
 set -Eeuo pipefail
 cd "$1"
-find . -type f ! -name 'SHA256SUMS' -print0 |
-  LC_ALL=C sort -z |
-  xargs -0 sha256sum |
-  sha256sum |
-  cut -c1-12
+sha256sum --check --strict SHA256SUMS >/dev/null
 REMOTE_DIGEST
-)
-if [[ $local_digest != "$remote_digest" ]]; then
-  echo "Transfer verification failed (local $local_digest, remote $remote_digest)" >&2
-  exit 1
-fi
 
 ssh "$target_host" bash -s -- \
   "$deploy_root" "$incoming_dir" "$release_dir" "$release_id" "$deployment_mode" <<'REMOTE_DEPLOY'
@@ -218,15 +254,7 @@ if [[ -e $release_dir ]]; then
 fi
 mv "$incoming_dir" "$release_dir"
 
-echo 'Building immutable release images while the current release stays live...'
-docker build --file "$release_dir/Dockerfile.services" --target runtime \
-  --tag "latex-workshop-services:$release_id" "$release_dir"
-docker build --file "$release_dir/apps/web/Dockerfile" \
-  --tag "latex-workshop-web:$release_id" "$release_dir"
-
 if [[ $deployment_mode == production ]]; then
-  docker build --file "$release_dir/infra/texlive/Dockerfile" \
-    --tag "latex-workshop-texlive:$release_id" "$release_dir"
   texlive_image="latex-workshop-texlive:$release_id"
 else
   texlive_image=$(sed -n 's/^TEXLIVE_IMAGE=//p' "$env_file" | tail -1)
@@ -236,6 +264,53 @@ else
   fi
   echo "Reusing TeX image $texlive_image"
 fi
+
+build_log_dir=$deploy_root/runtime/build-logs/$release_id
+build_pids=()
+build_names=()
+mkdir -p "$build_log_dir"
+
+start_image_build() {
+  local name=$1
+  shift
+  echo "Starting $name image build..."
+  "$@" >"$build_log_dir/$name.log" 2>&1 &
+  build_pids+=("$!")
+  build_names+=("$name")
+}
+
+cleanup_image_builds() {
+  local pid
+  for pid in "${build_pids[@]}"; do
+    kill "$pid" >/dev/null 2>&1 || true
+  done
+  rm -rf -- "$build_log_dir"
+}
+trap cleanup_image_builds EXIT
+
+start_image_build services docker build --file "$release_dir/Dockerfile.services" \
+  --target runtime --tag "latex-workshop-services:$release_id" "$release_dir"
+start_image_build web docker build --file "$release_dir/apps/web/Dockerfile" \
+  --tag "latex-workshop-web:$release_id" "$release_dir"
+if [[ $deployment_mode == production ]]; then
+  start_image_build texlive docker build --file "$release_dir/infra/texlive/Dockerfile" \
+    --tag "$texlive_image" "$release_dir"
+fi
+
+build_failed=false
+for index in "${!build_pids[@]}"; do
+  if wait "${build_pids[$index]}"; then
+    echo "Completed ${build_names[$index]} image build"
+  else
+    echo "Failed ${build_names[$index]} image build:" >&2
+    cat "$build_log_dir/${build_names[$index]}.log" >&2
+    build_failed=true
+  fi
+done
+build_pids=()
+[[ $build_failed == false ]]
+rm -rf -- "$build_log_dir"
+trap - EXIT
 
 if [[ $deployment_mode == production ]]; then
   current_release=$(readlink -f "$deploy_root/current" 2>/dev/null || true)
@@ -269,12 +344,8 @@ compose=(docker compose --env-file "$env_file" -f "$deploy_root/current/infra/co
 "${compose[@]}" up -d postgres redis minio mailpit minio-init </dev/null
 migration_started=true
 "${compose[@]}" run --rm -T --interactive=false migrate </dev/null
-"${compose[@]}" up -d --force-recreate --wait --wait-timeout 180 \
+"${compose[@]}" up -d --wait --wait-timeout 180 \
   api language-service compile-worker web </dev/null
-
-"${compose[@]}" exec -T api curl -fsS http://127.0.0.1:3001/health/ready \
-  </dev/null >/dev/null
-"${compose[@]}" exec -T web wget -qO- http://127.0.0.1/health/live </dev/null >/dev/null
 
 for service in api language-service compile-worker web; do
   container_id=$("${compose[@]}" ps -q "$service" </dev/null)
@@ -289,6 +360,11 @@ for service in api language-service compile-worker web; do
     exit 1
   fi
 done
+
+ca=/home/mind-palace/services/mind-palace-platform/trust/mind-palace-root.crt
+curl --fail --silent --show-error --retry 6 --retry-delay 2 --cacert "$ca" \
+  --resolve mind-palace:8443:127.0.0.1 \
+  https://mind-palace:8443/latex-workshop/health/live >/dev/null
 
 trap - ERR
 "${compose[@]}" rm -f minio-init texlive-image </dev/null
@@ -309,17 +385,10 @@ while IFS= read -r old_release; do
   rm -rf -- "$old_release"
 done < <(find "$deploy_root/releases" -mindepth 1 -maxdepth 1 -type d ! -name '.incoming-*' -print)
 
-docker builder prune --force --filter until=168h >/dev/null
+if [[ $deployment_mode == production ]]; then
+  nohup docker builder prune --force --filter until=168h >/dev/null 2>&1 </dev/null &
+fi
 echo "Activated release $release_id"
 REMOTE_DEPLOY
-
-ssh "$target_host" bash -s -- "$deploy_root" <<'REMOTE_EDGE_HEALTH'
-set -Eeuo pipefail
-deploy_root=$1
-ca=/home/mind-palace/services/mind-palace-platform/trust/mind-palace-root.crt
-curl --fail --silent --show-error --retry 6 --retry-delay 2 --cacert "$ca" \
-  --resolve mind-palace:8443:127.0.0.1 \
-  https://mind-palace:8443/latex-workshop/health/live >/dev/null
-REMOTE_EDGE_HEALTH
 
 echo "Deployment complete: $release_id"

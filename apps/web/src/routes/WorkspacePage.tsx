@@ -1020,6 +1020,7 @@ export default function WorkspacePage() {
         <div className="project-title">
           <Code2 size={17} />
           <span>{payload.project.name}</span>
+          {payload.project.isTemplate && <span className="badge">Template</span>}
           {successfulCompile &&
             successfulCompile.sourceRevision < payload.project.sourceRevision && (
               <span className="badge badge-warning">PDF out of date</span>
@@ -2227,6 +2228,7 @@ function SettingsDialog({
   const [name, setName] = useState(project.name);
   const [compiler, setCompiler] = useState(project.compiler);
   const [mainFileId, setMainFileId] = useState(project.mainFileId ?? '');
+  const [isTemplate, setIsTemplate] = useState(project.isTemplate);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
@@ -2234,8 +2236,9 @@ function SettingsDialog({
     setName(project.name);
     setCompiler(project.compiler);
     setMainFileId(project.mainFileId ?? '');
+    setIsTemplate(project.isTemplate);
     setError(null);
-  }, [open, project.compiler, project.mainFileId, project.name]);
+  }, [open, project.compiler, project.isTemplate, project.mainFileId, project.name]);
   return (
     <Dialog open={open} onOpenChange={onOpenChange} title="Project settings">
       <form
@@ -2251,7 +2254,7 @@ function SettingsDialog({
           try {
             await api(`/api/v1/projects/${project.id}`, {
               method: 'PATCH',
-              body: JSON.stringify({ name: name.trim(), compiler, mainFileId }),
+              body: JSON.stringify({ name: name.trim(), compiler, mainFileId, isTemplate }),
             });
             onSaved();
             onOpenChange(false);
@@ -2270,6 +2273,18 @@ function SettingsDialog({
             value={name}
             onChange={(event) => setName(event.target.value)}
           />
+        </label>
+        <label className="settings-checkbox">
+          <input
+            type="checkbox"
+            disabled={pending}
+            checked={isTemplate}
+            onChange={(event) => setIsTemplate(event.target.checked)}
+          />
+          <span>
+            <strong>Use as template</strong>
+            <small>Show this project in Templates instead of the normal library.</small>
+          </span>
         </label>
         <label className="field">
           Compiler
