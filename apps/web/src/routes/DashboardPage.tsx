@@ -91,7 +91,7 @@ type RouteUpdate = Partial<{
   sort: Sort | undefined;
 }>;
 type Modal =
-  | { type: 'create-project'; initialTemplateId?: string }
+  | { type: 'create-project'; mode: 'blank' | 'template'; initialTemplateId?: string }
   | { type: 'folder'; folder?: LibraryFolder; parentId: string | null }
   | { type: 'move-projects'; projectIds: string[] }
   | { type: 'move-folder'; folder: LibraryFolder }
@@ -820,7 +820,8 @@ export function DashboardPage() {
             {!trash && (
               <CreateMenu
                 importing={importing}
-                onProject={() => setModal({ type: 'create-project' })}
+                onBlankProject={() => setModal({ type: 'create-project', mode: 'blank' })}
+                onTemplateProject={() => setModal({ type: 'create-project', mode: 'template' })}
                 onFolder={() => setModal({ type: 'folder', parentId: currentFolder?.id ?? null })}
                 onImport={() => importRef.current?.click()}
                 onOverleaf={() => overleafImportRef.current?.click()}
@@ -992,7 +993,11 @@ export function DashboardPage() {
                         })
                       }
                       onUseTemplate={() =>
-                        setModal({ type: 'create-project', initialTemplateId: project.id })
+                        setModal({
+                          type: 'create-project',
+                          mode: 'template',
+                          initialTemplateId: project.id,
+                        })
                       }
                       onToggleTemplate={() =>
                         projectMutation.mutate({
@@ -1050,7 +1055,10 @@ export function DashboardPage() {
               }
               action={
                 !trash && !query && view !== 'templates' ? (
-                  <Button variant="primary" onClick={() => setModal({ type: 'create-project' })}>
+                  <Button
+                    variant="primary"
+                    onClick={() => setModal({ type: 'create-project', mode: 'blank' })}
+                  >
                     New project
                   </Button>
                 ) : undefined
@@ -1070,6 +1078,7 @@ export function DashboardPage() {
 
       {modal?.type === 'create-project' && (
         <ProjectCreateDialog
+          mode={modal.mode}
           destination={currentFolder}
           pending={projectMutation.isPending}
           templates={templates.data?.templates ?? []}
@@ -1902,13 +1911,15 @@ function DropdownItem({
 
 function CreateMenu({
   importing,
-  onProject,
+  onBlankProject,
+  onTemplateProject,
   onFolder,
   onImport,
   onOverleaf,
 }: {
   importing: boolean;
-  onProject: () => void;
+  onBlankProject: () => void;
+  onTemplateProject: () => void;
   onFolder: () => void;
   onImport: () => void;
   onOverleaf: () => void;
@@ -1922,11 +1933,14 @@ function CreateMenu({
       </DropdownMenu.Trigger>
       <DropdownMenu.Portal>
         <DropdownMenu.Content className="dropdown" align="end" sideOffset={6}>
-          <DropdownItem icon={<FileCode2 size={15} />} onSelect={onProject}>
-            New project
+          <DropdownItem icon={<FileCode2 size={15} />} onSelect={onBlankProject}>
+            New Blank Project
+          </DropdownItem>
+          <DropdownItem icon={<LayoutTemplate size={15} />} onSelect={onTemplateProject}>
+            New Project from Template
           </DropdownItem>
           <DropdownItem icon={<FolderPlus size={15} />} onSelect={onFolder}>
-            New folder
+            New Directory
           </DropdownItem>
           <DropdownMenu.Separator className="dropdown-separator" />
           <DropdownItem icon={<Upload size={15} />} onSelect={onImport}>
@@ -1988,6 +2002,7 @@ function BulkBar({
 }
 
 function ProjectCreateDialog({
+  mode,
   destination,
   pending,
   templates,
@@ -1998,6 +2013,7 @@ function ProjectCreateDialog({
   onClose,
   onCreate,
 }: {
+  mode: 'blank' | 'template';
   destination: LibraryFolder | null;
   pending: boolean;
   templates: TemplateSummary[];
@@ -2011,12 +2027,13 @@ function ProjectCreateDialog({
   const [name, setName] = useState('Untitled project');
   const [templateProjectId, setTemplateProjectId] = useState<string | null>(initialTemplateId);
   const [error, setError] = useState<string | null>(null);
+
   return (
     <Dialog
       open
       onOpenChange={(open) => !open && onClose()}
-      title="Create project"
-      wide
+      title={mode === 'template' ? 'New Project from Template' : 'New Blank Project'}
+      wide={mode === 'template'}
       description={
         destination
           ? `The project will be created in ${destination.name}.`
@@ -2044,69 +2061,75 @@ function ProjectCreateDialog({
             required
           />
         </label>
-        <fieldset className="template-picker" disabled={pending}>
-          <legend>Start from</legend>
-          <div className="template-options" role="radiogroup" aria-label="Project starting point">
-            <label
-              className={classNames('template-option', templateProjectId === null && 'selected')}
-            >
-              <input
-                type="radio"
-                name="project-template"
-                checked={templateProjectId === null}
-                onChange={() => setTemplateProjectId(null)}
-              />
-              <FileCode2 size={22} />
-              <span>
-                <strong>Blank project</strong>
-                <small>A clean main.tex document</small>
-              </span>
-            </label>
-            {templates.map((template) => (
+        {mode === 'template' && (
+          <fieldset className="template-picker" disabled={pending}>
+            <legend>Choose a starting point</legend>
+            <div className="template-options" role="radiogroup" aria-label="Project starting point">
               <label
-                key={template.id}
-                className={classNames(
-                  'template-option',
-                  templateProjectId === template.id && 'selected',
-                )}
+                className={classNames('template-option', templateProjectId === null && 'selected')}
               >
                 <input
+                  className="sr-only"
                   type="radio"
                   name="project-template"
-                  checked={templateProjectId === template.id}
-                  onChange={() => setTemplateProjectId(template.id)}
+                  checked={templateProjectId === null}
+                  onChange={() => setTemplateProjectId(null)}
                 />
-                <LayoutTemplate size={22} />
-                <span>
-                  <strong>
-                    {template.name}
-                    {template.isStarter && <em>Starter</em>}
-                  </strong>
-                  <small>
-                    {formatCompiler(template.compiler)} · Updated{' '}
-                    {formatRelative(template.updatedAt)}
-                  </small>
+                <BlankProjectThumbnail />
+                <span className="template-option-copy">
+                  <strong>Blank project</strong>
+                  <small>A clean main.tex document</small>
                 </span>
               </label>
-            ))}
-          </div>
-          {templatesPending && (
-            <p className="hint" role="status">
-              Loading templates…
-            </p>
-          )}
-          {templatesError && (
-            <div className="template-picker-error" role="alert">
-              <span>{templatesError}</span>
-              <Button type="button" onClick={onRetryTemplates}>
-                Try again
-              </Button>
+              {templates.map((template) => (
+                <label
+                  key={template.id}
+                  className={classNames(
+                    'template-option',
+                    templateProjectId === template.id && 'selected',
+                  )}
+                >
+                  <input
+                    className="sr-only"
+                    type="radio"
+                    name="project-template"
+                    checked={templateProjectId === template.id}
+                    onChange={() => setTemplateProjectId(template.id)}
+                  />
+                  <div className="template-option-preview">
+                    <ProjectThumbnail projectId={template.id} jobId={template.previewJobId} />
+                  </div>
+                  <span className="template-option-copy">
+                    <strong>
+                      {template.name}
+                      {template.isStarter && <em>Starter</em>}
+                    </strong>
+                    <small>
+                      {formatCompiler(template.compiler)} · Updated{' '}
+                      {formatRelative(template.updatedAt)}
+                    </small>
+                  </span>
+                </label>
+              ))}
             </div>
-          )}
-          {!templatesPending && !templatesError && templates.length === 0 && (
-            <p className="hint">No templates yet. Use a project’s actions menu to make one.</p>
-          )}
-        </fieldset>
+            {templatesPending && (
+              <p className="hint" role="status">
+                Loading templates…
+              </p>
+            )}
+            {templatesError && (
+              <div className="template-picker-error" role="alert">
+                <span>{templatesError}</span>
+                <Button type="button" onClick={onRetryTemplates}>
+                  Try again
+                </Button>
+              </div>
+            )}
+            {!templatesPending && !templatesError && templates.length === 0 && (
+              <p className="hint">No templates yet. You can still start with the blank project.</p>
+            )}
+          </fieldset>
+        )}
         {error && (
           <p className="form-error" role="alert">
             {error}
@@ -2122,6 +2145,23 @@ function ProjectCreateDialog({
         </div>
       </form>
     </Dialog>
+  );
+}
+
+function BlankProjectThumbnail() {
+  return (
+    <div
+      className="template-option-preview blank-template-preview"
+      aria-label="Blank project preview"
+    >
+      <div className="blank-template-page">
+        <strong>Lorem ipsum</strong>
+        <span />
+        <span />
+        <span />
+        <span />
+      </div>
+    </div>
   );
 }
 

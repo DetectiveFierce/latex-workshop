@@ -5,6 +5,7 @@ import type { AppContext } from '../lib/context.js';
 import { requireUser } from '../lib/context.js';
 import { incrementMetric } from '../lib/operational-metrics.js';
 import { AIDAN_TEMPLATE_SEED_KEY, ensureAidanTemplate } from '../lib/project-creation.js';
+import { scheduleTemplatePreview } from '../lib/template-previews.js';
 
 export async function registerTemplateRoutes(app: FastifyInstance, context: AppContext) {
   app.get('/api/v1/templates', async (request) => {
@@ -51,6 +52,7 @@ export async function registerTemplateRoutes(app: FastifyInstance, context: AppC
           .orderBy(compileJobs.projectId, desc(compileJobs.createdAt))
       : [];
     const previewByProject = new Map(compiles.map((compile) => [compile.projectId, compile.id]));
+    for (const projectId of projectIds) scheduleTemplatePreview(context, projectId);
     return {
       templates: rows.map(({ project, seedKey }) => ({
         ...project,

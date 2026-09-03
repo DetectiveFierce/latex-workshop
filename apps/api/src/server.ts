@@ -6,6 +6,7 @@ import rateLimit from '@fastify/rate-limit';
 import swagger from '@fastify/swagger';
 import swaggerUi from '@fastify/swagger-ui';
 import { sql } from 'drizzle-orm';
+import { z } from 'zod';
 import { loadConfig } from '@latex-workshop/config';
 import { buildOpenApiDocument } from '@latex-workshop/contracts';
 import { createContext } from './lib/context.js';
@@ -13,6 +14,7 @@ import { HttpError } from './lib/errors.js';
 import { startMaintenance } from './lib/maintenance.js';
 import { publicRequestUrl } from './lib/public-request-url.js';
 import { renderOperationalMetrics } from './lib/operational-metrics.js';
+import { scheduleTemplatePreview } from './lib/template-previews.js';
 import { registerCompileRoutes } from './routes/compiles.js';
 import { registerHistoryRoutes } from './routes/history.js';
 import { registerLibraryRoutes } from './routes/library.js';
@@ -64,6 +66,11 @@ export async function buildServer() {
   });
   await app.register(rateLimit, { global: true, max: 300, timeWindow: '1 minute' });
   await app.register(multipart, { limits: { fileSize: config.MAX_PROJECT_BYTES, files: 1 } });
+  app.addHook('onResponse', async (request, reply) => {
+    if (request.method === 'GET' || request.method === 'HEAD' || reply.statusCode >= 400) return;
+    const parsed = z.object({ projectId: z.uuid() }).safeParse(request.params);
+    if (parsed.success) scheduleTemplatePreview(context, parsed.data.projectId);
+  });
   await app.register(swagger, {
     mode: 'static',
     specification: { document: buildOpenApiDocument(config.API_ORIGIN) },

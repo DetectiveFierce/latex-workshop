@@ -213,7 +213,7 @@ export async function saveTextFileVersion(
 }
 
 export async function createCheckpoint(
-  db: Database,
+  db: Database | DatabaseTransaction,
   projectId: string,
   reason: 'periodic' | 'compile' | 'import' | 'restore',
 ) {

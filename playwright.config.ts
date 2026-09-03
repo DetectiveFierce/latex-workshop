@@ -6,6 +6,8 @@ const ipad = extendedBrowsers || process.env.E2E_IPAD === 'true';
 export default defineConfig({
   testDir: './tests/e2e',
   fullyParallel: false,
+  // Stateful projects share one local API/IP, including background template compilations.
+  workers: 1,
   retries: process.env.CI ? 2 : 0,
   reporter: process.env.CI ? [['html', { open: 'never' }], ['github']] : 'list',
   use: {

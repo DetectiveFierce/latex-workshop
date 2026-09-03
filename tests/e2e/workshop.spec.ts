@@ -43,7 +43,9 @@ test('verified user creates, edits, persists, and compiles a project', async ({
   ).toEqual([]);
 
   await page.getByRole('button', { name: 'New', exact: true }).click();
-  await page.getByRole('menuitem', { name: 'New project' }).click();
+  await expect(page.getByRole('menuitem', { name: 'New Project from Template' })).toBeVisible();
+  await expect(page.getByRole('menuitem', { name: 'New Directory' })).toBeVisible();
+  await page.getByRole('menuitem', { name: 'New Blank Project' }).click();
   await page.getByLabel('Project name').fill(projectName);
   await page.getByRole('button', { name: 'Create project' }).click();
   await expect(page.getByText(projectName)).toBeVisible();
@@ -334,8 +336,66 @@ test('library organizes projects with folders, tags, views, bulk actions, and re
   await page.getByRole('button', { name: 'Templates' }).click();
   await expect(page.getByRole('heading', { name: 'Templates' })).toBeVisible();
   await expect(page.getByText('Aidan Template', { exact: true })).toBeVisible();
+  await expect
+    .poll(
+      async () => {
+        const response = await page.request.get('api/v1/templates');
+        const body = (await response.json()) as {
+          templates: Array<{ name: string; previewJobId: string | null }>;
+        };
+        return body.templates.find((template) => template.name === 'Aidan Template')?.previewJobId;
+      },
+      { intervals: [2_000], timeout: 60_000 },
+    )
+    .toEqual(expect.any(String));
+  const templateList = (await (await page.request.get('api/v1/templates')).json()) as {
+    templates: Array<{ id: string; name: string; previewJobId: string | null }>;
+  };
+  const aidanTemplate = templateList.templates.find(
+    (template) => template.name === 'Aidan Template',
+  )!;
+  const projectDetail = (await (
+    await page.request.get(`api/v1/projects/${aidanTemplate.id}`)
+  ).json()) as {
+    project: { mainFileId: string };
+  };
+  const mainContent = (await (
+    await page.request.get(
+      `api/v1/projects/${aidanTemplate.id}/entries/${projectDetail.project.mainFileId}/content`,
+    )
+  ).json()) as { content: string; version: number };
+  const edited = await page.request.put(
+    `api/v1/projects/${aidanTemplate.id}/entries/${projectDetail.project.mainFileId}/content`,
+    {
+      data: {
+        baseVersion: mainContent.version,
+        content: `${mainContent.content}\n% exercise automatic template thumbnail refresh\n`,
+      },
+    },
+  );
+  expect(edited.ok()).toBeTruthy();
+  await expect
+    .poll(
+      async () => {
+        const response = await page.request.get('api/v1/templates');
+        const body = (await response.json()) as {
+          templates: Array<{ id: string; previewJobId: string | null }>;
+        };
+        const previewJobId = body.templates.find(
+          (template) => template.id === aidanTemplate.id,
+        )?.previewJobId;
+        return previewJobId === aidanTemplate.previewJobId ? null : previewJobId;
+      },
+      { intervals: [2_000], timeout: 60_000 },
+    )
+    .toEqual(expect.any(String));
+  await page.reload();
   await page.getByRole('button', { name: 'Aidan Template actions' }).click();
   await page.getByRole('menuitem', { name: 'Use template' }).click();
+  await expect(page.locator('.blank-template-preview')).toBeVisible();
+  const aidanOption = page.locator('.template-option').filter({ hasText: 'Aidan Template' });
+  await expect(aidanOption).toBeVisible();
+  await expect(aidanOption.locator('.project-thumbnail')).toHaveClass(/loaded/);
   await expect(page.getByRole('radio', { name: /Aidan Template/ })).toBeChecked();
   await page.getByLabel('Project name').fill('From Aidan');
   await page.getByRole('button', { name: 'Create project' }).click();
@@ -355,7 +415,7 @@ test('library organizes projects with folders, tags, views, bulk actions, and re
   await expect(page.getByText('From Aidan', { exact: true })).toBeVisible();
 
   await page.getByRole('button', { name: 'New', exact: true }).click();
-  await page.getByRole('menuitem', { name: 'New folder' }).click();
+  await page.getByRole('menuitem', { name: 'New Directory' }).click();
   await page.getByLabel('Folder name').fill('Research');
   await page.getByRole('button', { name: 'Create folder' }).click();
   await expect(
@@ -365,7 +425,7 @@ test('library organizes projects with folders, tags, views, bulk actions, and re
   await expect(page.getByRole('heading', { name: 'Research' })).toBeVisible();
 
   await page.getByRole('button', { name: 'New', exact: true }).click();
-  await page.getByRole('menuitem', { name: 'New folder' }).click();
+  await page.getByRole('menuitem', { name: 'New Directory' }).click();
   await page.getByLabel('Folder name').fill('2026');
   await page.getByRole('button', { name: 'Create folder' }).click();
   await expect(
@@ -491,7 +551,7 @@ test('iPad desktop workspace edits, manages files, uploads, and compiles', async
   await expect(page.getByRole('heading', { name: 'Library' })).toBeVisible();
 
   await page.getByRole('button', { name: 'New', exact: true }).tap();
-  await page.getByRole('menuitem', { name: 'New project' }).tap();
+  await page.getByRole('menuitem', { name: 'New Blank Project' }).tap();
   await page.getByLabel('Project name').fill(projectName);
   await page.getByRole('button', { name: 'Create project' }).tap();
   await expect(page.getByText('TexLab ready')).toBeVisible({ timeout: 30_000 });
