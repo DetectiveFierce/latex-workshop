@@ -407,18 +407,28 @@ test('library organizes projects with folders, tags, views, bulk actions, and re
     .getByRole('button', { name: 'Move', exact: true })
     .click();
   await page.getByRole('treeitem', { name: '2026' }).click();
+  const moveResponse = page.waitForResponse(
+    (response) =>
+      response.request().method() === 'POST' &&
+      response.url().endsWith('/api/v1/library/projects/actions'),
+  );
   await page.getByRole('button', { name: 'Move', exact: true }).click();
-  await expect(page.getByText('Project moved', { exact: true })).toBeVisible();
+  expect((await moveResponse).ok()).toBeTruthy();
   await expect(page.getByText('Folder Paper')).toHaveCount(0);
 
   await page.locator('.folder-tile').getByRole('button', { name: '2026', exact: true }).click();
   await expect(page.getByText('Folder Paper')).toBeVisible();
   await page.getByRole('checkbox', { name: 'Select Folder Paper' }).check();
+  const favoriteResponse = page.waitForResponse(
+    (response) =>
+      response.request().method() === 'POST' &&
+      response.url().endsWith('/api/v1/library/projects/actions'),
+  );
   await page
     .getByRole('toolbar', { name: 'Selected project actions' })
     .getByRole('button', { name: 'Favorite' })
     .click();
-  await expect(page.getByText('Project updated', { exact: true })).toBeVisible();
+  expect((await favoriteResponse).ok()).toBeTruthy();
   await page.getByRole('button', { name: 'Favorites', exact: true }).click();
   await expect(page.getByText('Folder Paper')).toBeVisible();
 
