@@ -247,6 +247,7 @@ export async function registerLibraryRoutes(app: FastifyInstance, context: AppCo
         await Promise.all([
           context.storage.deletePrefix(`artifacts/${project.id}/`),
           context.storage.deletePrefix(`edit-history/${project.id}/`),
+          context.storage.deletePrefix(`proposals/${user.id}/${project.id}/`),
         ]);
       await context.db.transaction(async (tx) => {
         if (contained.length)
@@ -438,6 +439,7 @@ export async function registerLibraryRoutes(app: FastifyInstance, context: AppCo
         await Promise.all([
           context.storage.deletePrefix(`artifacts/${projectId}/`),
           context.storage.deletePrefix(`edit-history/${projectId}/`),
+          context.storage.deletePrefix(`proposals/${user.id}/${projectId}/`),
         ]);
     }
 
@@ -537,6 +539,7 @@ export async function registerLibraryRoutes(app: FastifyInstance, context: AppCo
         projectIds.flatMap((projectId) => [
           context.storage.deletePrefix(`artifacts/${projectId}/`),
           context.storage.deletePrefix(`edit-history/${projectId}/`),
+          context.storage.deletePrefix(`proposals/${user.id}/${projectId}/`),
         ]),
       );
     return { updated: projectIds.length };

@@ -41,7 +41,8 @@
   "pnpm": {
     "overrides": {
       "@esbuild-kit/core-utils>esbuild": "0.25.12",
-      "dompurify": "3.4.13"
+      "dompurify": "3.4.13",
+      "zod": "4.3.6"
     }
   }
 }

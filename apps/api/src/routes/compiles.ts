@@ -239,6 +239,7 @@ export async function registerCompileRoutes(app: FastifyInstance, context: AppCo
     const syncStartedAt = Date.now();
     const input = parsed.data;
     const job = await successfulJob(context, projectId, jobId);
+    requireSyncSource(job, input.source);
     const [checkpoint] = await context.db
       .select()
       .from(checkpoints)
@@ -257,7 +258,7 @@ export async function registerCompileRoutes(app: FastifyInstance, context: AppCo
       (item) => item.entryId === currentEntry?.id || item.path === input.path,
     );
     if (!manifestEntry) throw notFound('Source file is not present in this compilation');
-    const [compiledVersion] = manifestEntry
+    const [compiledVersion] = manifestEntry.versionId
       ? await context.db
           .select({ version: fileVersions.version })
           .from(fileVersions)
@@ -348,6 +349,7 @@ export async function registerCompileRoutes(app: FastifyInstance, context: AppCo
     if (!parsed.success) throw badRequest('Invalid PDF position', parsed.error.flatten());
     const input = parsed.data;
     const job = await successfulJob(context, projectId, jobId);
+    requireSyncSource(job, input.source);
     const output = await querySyncTex(context, job, [
       'edit',
       '-o',
@@ -374,6 +376,21 @@ async function successfulJob(context: AppContext, projectId: string, jobId: stri
     .limit(1);
   if (!job?.pdfObjectKey) throw notFound('Compiled PDF not found');
   return job;
+}
+
+function requireSyncSource(
+  job: typeof compileJobs.$inferSelect,
+  source:
+    | { target: 'accepted' }
+    | { target: 'proposal'; proposalId: string; proposalRevision: number },
+) {
+  if (source.target !== job.target) throw notFound('Compilation source not found');
+  if (
+    source.target === 'proposal' &&
+    (job.proposalId !== source.proposalId || job.proposalRevision !== source.proposalRevision)
+  ) {
+    throw notFound('Compilation source not found');
+  }
 }
 
 async function querySyncTex(

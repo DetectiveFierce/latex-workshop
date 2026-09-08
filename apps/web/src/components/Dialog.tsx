@@ -17,15 +17,21 @@ export function Dialog({
   children: ReactNode;
   wide?: boolean;
 }) {
+  useEffect(() => {
+    if (open) return;
+
+    // Radix removes its modal pointer lock during the same commit. Restore the
+    // document after those cleanups finish in case the dialog remains mounted.
+    const timeout = window.setTimeout(restoreDocumentInteraction, 0);
+    return () => window.clearTimeout(timeout);
+  }, [open]);
+
   useEffect(
     () => () => {
       // Radix disables outside pointer events while a modal is open. If navigation
       // unmounts the route during a dialog submit, its own teardown can run after
       // this cleanup. Restore interaction once all unmount cleanups have settled.
-      window.setTimeout(() => {
-        document.documentElement.style.removeProperty('pointer-events');
-        document.body.style.removeProperty('pointer-events');
-      }, 0);
+      window.setTimeout(restoreDocumentInteraction, 0);
     },
     [],
   );
@@ -52,4 +58,9 @@ export function Dialog({
       </DialogPrimitive.Portal>
     </DialogPrimitive.Root>
   );
+}
+
+function restoreDocumentInteraction() {
+  document.documentElement.style.removeProperty('pointer-events');
+  document.body.style.removeProperty('pointer-events');
 }

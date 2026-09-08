@@ -1,19 +1,34 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useNavigate } from '@tanstack/react-router';
-import { ArrowLeft, Keyboard, LogOut, RotateCcw, ShieldCheck, Trash2 } from 'lucide-react';
+import {
+  ArrowLeft,
+  Bot,
+  Copy,
+  Keyboard,
+  LogOut,
+  RotateCcw,
+  ShieldCheck,
+  Trash2,
+} from 'lucide-react';
 import {
   shortcutCategories,
+  agentClientMetadataSchema,
+  agentGrantsResponseSchema,
   shortcutRegistry,
   shortcutsConflict,
   type KeyboardKeymap,
   type KeyboardShortcutProfiles,
   type KeyboardShortcutOverrides,
   type ShortcutActionId,
+  type AgentGrant,
+  type Project,
 } from '@latex-workshop/contracts';
 import { Button } from '../components/Button';
 import { Dialog } from '../components/Dialog';
 import { Logo } from '../components/Logo';
+import { AgentProjectPicker } from '../features/agent-proposals/AgentProjectPicker';
+import { clearPreservedOAuthConsentQuery } from '../features/agent-proposals/oauthConsentQuery';
 import { authClient } from '../lib/auth';
 import { api, appPath, queryKeys } from '../lib/api';
 import {
@@ -69,12 +84,21 @@ export function AccountSettingsDialog({
   );
 }
 
-function AccountSettingsContent({
+export type PendingAgentConsent = {
+  oauthQuery: string;
+  clientId: string;
+  clientName: string;
+  scopes: string[];
+};
+
+export function AccountSettingsContent({
   focusKeyboard = false,
   onClose,
+  pendingConsent,
 }: {
   focusKeyboard?: boolean;
   onClose?: () => void;
+  pendingConsent?: PendingAgentConsent | undefined;
 }) {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -160,6 +184,7 @@ function AccountSettingsContent({
           Revoke other sessions
         </Button>
       </section>
+      <AgentAccessSettings pendingConsent={pendingConsent} />
       <KeyboardShortcutSettings
         userId={session.user.id}
         queryClient={queryClient}
@@ -198,6 +223,317 @@ function AccountSettingsContent({
         </div>
       </section>
     </>
+  );
+}
+
+function AgentAccessSettings({
+  pendingConsent,
+}: {
+  pendingConsent?: PendingAgentConsent | undefined;
+}) {
+  const queryClient = useQueryClient();
+  const connections = useQuery({
+    queryKey: ['agent-connections'],
+    queryFn: async () =>
+      agentGrantsResponseSchema.parse(await api<unknown>('/api/v1/agent-connections')),
+  });
+  const pendingClient = useQuery({
+    queryKey: ['agent-client-metadata', pendingConsent?.clientId],
+    enabled: Boolean(pendingConsent?.clientId),
+    queryFn: async () =>
+      agentClientMetadataSchema.parse(
+        await api<unknown>(
+          `/api/v1/agent-connections/client?clientId=${encodeURIComponent(pendingConsent?.clientId ?? '')}`,
+        ),
+      ),
+  });
+  const projects = useQuery({
+    queryKey: ['agent-access-projects'],
+    queryFn: () => api<{ projects: Project[] }>('/api/v1/projects'),
+  });
+  return (
+    <section className="account-section" id="agent-access">
+      <h2>
+        <Bot size={18} aria-hidden="true" /> Agent access
+      </h2>
+      <p className="hint">
+        Connected agents can read only authorized projects and can propose changes for your review.
+        They cannot directly edit accepted files.
+      </p>
+      <AgentSetupCard />
+      {pendingConsent && (
+        <PendingAgentConsentCard
+          consent={{
+            ...pendingConsent,
+            clientName:
+              pendingClient.data?.clientName ??
+              connections.data?.connections.find(
+                (connection) => connection.clientId === pendingConsent.clientId,
+              )?.clientName ??
+              pendingConsent.clientName,
+          }}
+          projects={projects.data?.projects ?? []}
+          existingConnection={connections.data?.connections.find(
+            (connection) => connection.clientId === pendingConsent.clientId,
+          )}
+          onChanged={() => void queryClient.invalidateQueries({ queryKey: ['agent-connections'] })}
+        />
+      )}
+      {!pendingConsent && !connections.data?.connections.length && (
+        <p className="hint">No AI agents are connected.</p>
+      )}
+      {connections.data?.connections.map((connection) => (
+        <AgentConnectionRow
+          key={connection.clientId}
+          connection={connection}
+          projects={projects.data?.projects ?? []}
+          onChanged={() => void queryClient.invalidateQueries({ queryKey: ['agent-connections'] })}
+        />
+      ))}
+    </section>
+  );
+}
+
+function AgentSetupCard() {
+  const endpoint = new URL(appPath('/api/mcp'), window.location.origin).href;
+  const [copied, setCopied] = useState(false);
+  return (
+    <div className="agent-setup-card">
+      <div>
+        <strong>Connect an agent or another device</strong>
+        <p className="hint">
+          Add this remote HTTP MCP server in Codex, Pi, or Grok. Each device authorizes once; tools
+          and guidance update from this server automatically.
+        </p>
+      </div>
+      <div className="agent-endpoint-row">
+        <code>{endpoint}</code>
+        <Button
+          type="button"
+          onClick={async () => {
+            try {
+              await navigator.clipboard.writeText(endpoint);
+              setCopied(true);
+              window.setTimeout(() => setCopied(false), 1_500);
+            } catch {
+              window.prompt('Copy the MCP server URL:', endpoint);
+            }
+          }}
+        >
+          <Copy size={15} aria-hidden="true" /> {copied ? 'Copied' : 'Copy URL'}
+        </Button>
+      </div>
+      <small>
+        Credentials stay on that device. Revoke a device at any time below without changing this URL
+        or the server-managed agent instructions.
+      </small>
+    </div>
+  );
+}
+
+function PendingAgentConsentCard({
+  consent,
+  projects,
+  existingConnection,
+  onChanged,
+}: {
+  consent: PendingAgentConsent;
+  projects: Project[];
+  existingConnection?: AgentGrant | undefined;
+  onChanged: () => void;
+}) {
+  const [selected, setSelected] = useState<string[]>(existingConnection?.projectIds ?? []);
+  const [allProjects, setAllProjects] = useState(existingConnection?.allProjects ?? false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  useEffect(() => {
+    if (!existingConnection || selected.length || allProjects) return;
+    setSelected(existingConnection.projectIds);
+    setAllProjects(existingConnection.allProjects);
+  }, [allProjects, existingConnection, selected.length]);
+  async function decide(accept: boolean) {
+    setBusy(true);
+    setError('');
+    let grantsStored = false;
+    try {
+      if (accept) {
+        if (!allProjects && !selected.length) throw new Error('Select at least one project.');
+        await api('/api/v1/agent-connections/grants', {
+          method: 'PUT',
+          body: JSON.stringify({
+            clientId: consent.clientId,
+            projectIds: selected,
+            allProjects,
+          }),
+        });
+        grantsStored = true;
+      }
+      const response = await fetch(appPath('/api/auth/oauth2/consent'), {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ accept, oauth_query: consent.oauthQuery }),
+      });
+      const result = (await response.json()) as {
+        url?: unknown;
+        redirect_uri?: unknown;
+        message?: unknown;
+      };
+      if (!response.ok)
+        throw new Error(typeof result.message === 'string' ? result.message : 'Consent failed');
+      const destination = typeof result.url === 'string' ? result.url : result.redirect_uri;
+      if (typeof destination !== 'string')
+        throw new Error('The authorization response was incomplete');
+      onChanged();
+      clearPreservedOAuthConsentQuery();
+      window.location.assign(destination);
+    } catch (cause) {
+      if (grantsStored)
+        await api(`/api/v1/agent-connections?clientId=${encodeURIComponent(consent.clientId)}`, {
+          method: 'DELETE',
+        }).catch(() => undefined);
+      setError(cause instanceof Error ? cause.message : 'Unable to authorize this agent');
+      setBusy(false);
+    }
+  }
+  return (
+    <div className="agent-connection-card">
+      <strong>{consent.clientName || 'Unknown client'}</strong>
+      <p className="hint">
+        {consent.scopes.includes('projects:read') ? 'Read selected projects' : 'Basic identity'}
+        {consent.scopes.includes('proposals:write')
+          ? ' · Create reviewable proposals, never direct edits'
+          : ''}
+      </p>
+      <p className="hint" id="pending-agent-projects">
+        Projects this agent may access
+      </p>
+      <AgentProjectPicker
+        projects={projects}
+        selected={selected}
+        allProjects={allProjects}
+        onChange={setSelected}
+        onAllProjectsChange={setAllProjects}
+        disabled={busy}
+        labelledBy="pending-agent-projects"
+      />
+      {error && (
+        <p className="field-error" role="alert">
+          {error}
+        </p>
+      )}
+      <div className="dialog-actions">
+        <Button disabled={busy} onClick={() => void decide(false)}>
+          Deny
+        </Button>
+        <Button
+          variant="primary"
+          disabled={busy || (!allProjects && !selected.length)}
+          onClick={() => void decide(true)}
+        >
+          {busy ? 'Connecting…' : 'Allow selected projects'}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function AgentConnectionRow({
+  connection,
+  projects,
+  onChanged,
+}: {
+  connection: AgentGrant;
+  projects: Project[];
+  onChanged: () => void;
+}) {
+  const [selected, setSelected] = useState(connection.projectIds);
+  const [allProjects, setAllProjects] = useState(connection.allProjects);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  return (
+    <div className="agent-connection-card">
+      <strong>{connection.clientName}</strong>
+      <span className="hint">{connection.clientId}</span>
+      <p className="hint" id={`agent-projects-${connection.clientId}`}>
+        Projects this agent may access
+      </p>
+      <AgentProjectPicker
+        projects={projects}
+        selected={selected}
+        allProjects={allProjects}
+        onChange={setSelected}
+        onAllProjectsChange={setAllProjects}
+        disabled={busy}
+        labelledBy={`agent-projects-${connection.clientId}`}
+      />
+      {error && (
+        <p className="field-error" role="alert">
+          {error}
+        </p>
+      )}
+      <div className="dialog-actions">
+        <Button
+          disabled={busy || (!allProjects && !selected.length)}
+          onClick={async () => {
+            setBusy(true);
+            setError('');
+            try {
+              await api('/api/v1/agent-connections/grants', {
+                method: 'PUT',
+                body: JSON.stringify({
+                  clientId: connection.clientId,
+                  projectIds: selected,
+                  allProjects,
+                }),
+              });
+              onChanged();
+            } catch (cause) {
+              setError(cause instanceof Error ? cause.message : 'Unable to update grants');
+            } finally {
+              setBusy(false);
+            }
+          }}
+        >
+          Save project access
+        </Button>
+        <Button
+          disabled={busy}
+          onClick={async () => {
+            setBusy(true);
+            try {
+              await api(
+                `/api/v1/agent-connections/tokens?clientId=${encodeURIComponent(connection.clientId)}`,
+                { method: 'DELETE' },
+              );
+            } finally {
+              setBusy(false);
+            }
+          }}
+        >
+          Revoke tokens
+        </Button>
+        <Button
+          variant="danger"
+          disabled={busy}
+          onClick={async () => {
+            if (!window.confirm(`Revoke ${connection.clientName} and all of its tokens?`)) return;
+            setBusy(true);
+            try {
+              await api(
+                `/api/v1/agent-connections?clientId=${encodeURIComponent(connection.clientId)}`,
+                { method: 'DELETE' },
+              );
+              onChanged();
+            } finally {
+              setBusy(false);
+            }
+          }}
+        >
+          Revoke connection
+        </Button>
+      </div>
+    </div>
   );
 }
 

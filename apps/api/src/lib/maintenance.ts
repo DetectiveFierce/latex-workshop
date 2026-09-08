@@ -3,6 +3,7 @@ import { and, desc, eq, inArray, isNotNull, isNull, lt, notExists } from 'drizzl
 import {
   checkpoints,
   compileJobs,
+  agentProposals,
   fileBlobs,
   fileVersions,
   entries,
@@ -48,6 +49,31 @@ export async function runMaintenance(context: AppContext) {
     const now = Date.now();
     const retentionCutoff = new Date(now - RETENTION_MS);
 
+    const expiredProposals = await context.db
+      .select({
+        id: agentProposals.id,
+        userId: agentProposals.userId,
+        projectId: agentProposals.projectId,
+      })
+      .from(agentProposals)
+      .where(
+        and(
+          inArray(agentProposals.status, ['resolved', 'rejected']),
+          lt(agentProposals.updatedAt, retentionCutoff),
+        ),
+      );
+    for (const proposal of expiredProposals)
+      await context.storage.deletePrefix(
+        `proposals/${proposal.userId}/${proposal.projectId}/${proposal.id}/`,
+      );
+    if (expiredProposals.length)
+      await context.db.delete(agentProposals).where(
+        inArray(
+          agentProposals.id,
+          expiredProposals.map(({ id }) => id),
+        ),
+      );
+
     const orphanProjects = await context.db
       .select({ id: projects.id })
       .from(projects)
@@ -60,6 +86,14 @@ export async function runMaintenance(context: AppContext) {
     const deletedProjectIds = [
       ...new Set([...orphanProjects, ...expiredTrash].map(({ id }) => id)),
     ];
+    const deletedProjectProposals = deletedProjectIds.length
+      ? await context.db
+          .select({ userId: agentProposals.userId, projectId: agentProposals.projectId })
+          .from(agentProposals)
+          .where(inArray(agentProposals.projectId, deletedProjectIds))
+      : [];
+    for (const proposal of deletedProjectProposals)
+      await context.storage.deletePrefix(`proposals/${proposal.userId}/${proposal.projectId}/`);
     for (const id of deletedProjectIds)
       await Promise.all([
         context.storage.deletePrefix(`artifacts/${id}/`),
@@ -71,14 +105,12 @@ export async function runMaintenance(context: AppContext) {
     const expiredJobs = await context.db
       .select({
         id: compileJobs.id,
-        pdf: compileJobs.pdfObjectKey,
-        synctex: compileJobs.synctexObjectKey,
+        projectId: compileJobs.projectId,
       })
       .from(compileJobs)
       .where(lt(compileJobs.createdAt, retentionCutoff));
     for (const job of expiredJobs) {
-      if (job.pdf) await context.storage.delete(job.pdf);
-      if (job.synctex) await context.storage.delete(job.synctex);
+      await context.storage.deletePrefix(`artifacts/${job.projectId}/${job.id}/`);
     }
     if (expiredJobs.length)
       await context.db.delete(compileJobs).where(

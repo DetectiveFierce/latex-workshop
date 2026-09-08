@@ -107,7 +107,7 @@ describe('TexLabClient lifecycle', () => {
     );
 
     client.connect();
-    client.open(model as never);
+    client.open(model as never, 'accepted source');
     expect(FakeSocket.instances).toHaveLength(1);
     const first = FakeSocket.instances[0]!;
     first.open();
@@ -115,9 +115,15 @@ describe('TexLabClient lifecycle', () => {
     await vi.runAllTicks();
     await Promise.resolve();
 
-    expect(first.sent.filter((message) => message.method === 'textDocument/didOpen')).toHaveLength(
-      1,
-    );
+    const firstOpen = first.sent.find((message) => message.method === 'textDocument/didOpen');
+    expect(firstOpen).toMatchObject({
+      params: { textDocument: { text: 'accepted source' } },
+    });
+    client.changeText(model as never, 'accepted source changed');
+    expect(first.sent.at(-1)).toMatchObject({
+      method: 'textDocument/didChange',
+      params: { contentChanges: [{ text: 'accepted source changed' }] },
+    });
     expect(registrations).toEqual({
       completions: 1,
       hovers: 1,
@@ -146,9 +152,9 @@ describe('TexLabClient lifecycle', () => {
     await vi.runAllTicks();
     await Promise.resolve();
 
-    expect(second.sent.filter((message) => message.method === 'textDocument/didOpen')).toHaveLength(
-      1,
-    );
+    expect(second.sent.find((message) => message.method === 'textDocument/didOpen')).toMatchObject({
+      params: { textDocument: { text: 'accepted source changed' } },
+    });
     expect(registrations.completions).toBe(1);
     client.dispose();
   });

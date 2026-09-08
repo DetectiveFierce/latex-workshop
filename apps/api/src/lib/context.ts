@@ -13,8 +13,9 @@ export function createContext(config: AppConfig) {
   const storage = new ObjectStorage(config);
   const redis = new Redis(config.REDIS_URL, { maxRetriesPerRequest: null });
   const queue = new Queue('latex-compiles', { connection: redis });
+  const pdfRenderQueue = new Queue('latex-pdf-renders', { connection: redis });
   const auth = createAuth(database.db, storage, config);
-  return { config, ...database, storage, redis, queue, auth };
+  return { config, ...database, storage, redis, queue, pdfRenderQueue, auth };
 }
 
 export type AppContext = ReturnType<typeof createContext>;

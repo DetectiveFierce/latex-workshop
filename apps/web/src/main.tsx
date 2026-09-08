@@ -13,6 +13,7 @@ import { authClient } from './lib/auth';
 import { APP_BASE } from './lib/api';
 import { applyAppearance } from './lib/appearance';
 import { applyRequestedLayout } from './lib/layout';
+import { captureOAuthConsentQuery } from './features/agent-proposals/oauthConsentQuery';
 import '@fontsource/inter/latin-400.css';
 import '@fontsource/inter/latin-600.css';
 import '@fontsource/inter/latin-700.css';
@@ -21,6 +22,7 @@ import '@fontsource/jetbrains-mono/latin-600.css';
 import './styles/theme.css';
 import './styles/app.css';
 
+captureOAuthConsentQuery(window.location.pathname, window.location.search);
 applyRequestedLayout();
 applyAppearance();
 
@@ -35,6 +37,11 @@ const AccountPage = lazy(() =>
 );
 const WorkspacePage = lazy(() => import('./routes/WorkspacePage'));
 const PdfPage = lazy(() => import('./routes/PdfPage'));
+const OAuthConsentPage = lazy(() =>
+  import('./routes/OAuthConsentPage').then(({ OAuthConsentPage: component }) => ({
+    default: component,
+  })),
+);
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { staleTime: 10_000, retry: 1 }, mutations: { retry: 0 } },
@@ -108,6 +115,15 @@ const accountRoute = createRoute({
     </Suspense>
   ),
 });
+const oauthConsentRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/oauth/consent',
+  component: () => (
+    <Suspense fallback={<FullScreenLoader label="Opening authorization…" />}>
+      <OAuthConsentPage />
+    </Suspense>
+  ),
+});
 const workspaceRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/projects/$projectId',
@@ -131,6 +147,7 @@ const routeTree = rootRoute.addChildren([
   authRoute,
   projectsRoute,
   accountRoute,
+  oauthConsentRoute,
   workspaceRoute,
   pdfRoute,
 ]);

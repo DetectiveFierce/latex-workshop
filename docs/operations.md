@@ -24,9 +24,19 @@ All application containers handle `SIGTERM` and close listeners, workers, Redis 
 - API readiness: `GET /health/ready` checks PostgreSQL, Redis, and the object bucket.
 - API metrics: `GET /metrics` exposes Prometheus queue gauges.
 - Language service: `GET /health/live` and `GET /health/ready`
-- Worker health is the BullMQ worker heartbeat plus the `compile_jobs` state-age alert.
+- Worker health is the BullMQ worker heartbeat plus the `compile_jobs` state-age alert. Monitor both
+  the `latex-compiles` and `latex-pdf-renders` queues; page-render requests are short-lived and
+  should normally finish within 30 seconds.
 
 Alert on readiness failures, growing waiting queues, builds stuck beyond `COMPILE_TIMEOUT_MS + 30s`, repeated infrastructure retry failures, bucket errors, and less than 15% free PostgreSQL or object-storage capacity.
+
+When MCP is enabled, also alert on sustained OAuth/DCR failures, per-client rate-limit saturation,
+proposal compilations stuck at one revision, and unresolved proposal growth. Audit on
+`agent_connection.*` and `agent_proposal.*` action prefixes. Redis proposal events are only cache
+invalidation hints; PostgreSQL remains authoritative, so an event outage should increase reconnect
+and refetch traffic without losing proposals. Retention removes resolved/rejected proposal metadata
+and blobs after the normal 30-day history window, while unresolved proposals remain until their
+project is deleted.
 
 ## Backup and restore
 

@@ -20,6 +20,8 @@ describe('loadConfig', () => {
     const config = loadConfig({ ...base });
     expect(config.S3_PUBLIC_ENDPOINT).toBeUndefined();
     expect(config.S3_FORCE_PATH_STYLE).toBe(false);
+    expect(config.AGENT_MCP_ACCESS_TOKEN_TTL_SECONDS).toBe(3_600);
+    expect(config.AGENT_MCP_REFRESH_TOKEN_TTL_DAYS).toBe(365);
   });
 
   it('rejects ambiguous boolean values', () => {
@@ -41,11 +43,32 @@ describe('loadConfig', () => {
     );
   });
 
+  it('requires an HTTPS MCP resource when agent access is enabled in production', () => {
+    expect(() => loadConfig({ ...base, AGENT_MCP_ENABLED: 'true' })).toThrow(
+      'AGENT_MCP_RESOURCE_URL',
+    );
+    expect(() =>
+      loadConfig({
+        ...base,
+        AGENT_MCP_ENABLED: 'true',
+        AGENT_MCP_RESOURCE_URL: 'http://workshop.example.com/api/mcp',
+      }),
+    ).toThrow('HTTPS');
+    expect(
+      loadConfig({
+        ...base,
+        AGENT_MCP_ENABLED: 'true',
+        AGENT_MCP_RESOURCE_URL: 'https://workshop.example.com/api/mcp',
+      }).AGENT_MCP_ENABLED,
+    ).toBe(true);
+  });
+
   it.each([
     ['API_PORT', '0'],
     ['LSP_PORT', '65536'],
     ['SMTP_PORT', '1.5'],
     ['MAX_FILE_BYTES', String(Number.MAX_SAFE_INTEGER + 1)],
+    ['AGENT_MCP_REFRESH_TOKEN_TTL_DAYS', '3651'],
   ])('rejects invalid bounded integer configuration for %s', (key, value) => {
     expect(() => loadConfig({ ...base, [key]: value })).toThrow();
   });

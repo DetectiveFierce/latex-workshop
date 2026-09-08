@@ -27,7 +27,7 @@ export async function registerHistoryRoutes(app: FastifyInstance, context: AppCo
         createdAt: checkpoints.createdAt,
       })
       .from(checkpoints)
-      .where(eq(checkpoints.projectId, projectId))
+      .where(and(eq(checkpoints.projectId, projectId), eq(checkpoints.target, 'accepted')))
       .orderBy(desc(checkpoints.createdAt));
     return { checkpoints: rows.map((row) => ({ ...row, createdAt: row.createdAt.toISOString() })) };
   });
@@ -52,7 +52,13 @@ export async function registerHistoryRoutes(app: FastifyInstance, context: AppCo
     const [checkpoint] = await context.db
       .select()
       .from(checkpoints)
-      .where(and(eq(checkpoints.id, checkpointId), eq(checkpoints.projectId, projectId)))
+      .where(
+        and(
+          eq(checkpoints.id, checkpointId),
+          eq(checkpoints.projectId, projectId),
+          eq(checkpoints.target, 'accepted'),
+        ),
+      )
       .limit(1);
     if (!checkpoint) throw notFound('Checkpoint not found');
     return {
@@ -77,7 +83,13 @@ export async function registerHistoryRoutes(app: FastifyInstance, context: AppCo
     const [checkpoint] = await context.db
       .select()
       .from(checkpoints)
-      .where(and(eq(checkpoints.id, checkpointId), eq(checkpoints.projectId, projectId)))
+      .where(
+        and(
+          eq(checkpoints.id, checkpointId),
+          eq(checkpoints.projectId, projectId),
+          eq(checkpoints.target, 'accepted'),
+        ),
+      )
       .limit(1);
     const item = checkpoint?.manifest.find((entry) => entry.path === path);
     if (!item) throw notFound('Checkpoint file not found');
@@ -112,7 +124,13 @@ export async function registerHistoryRoutes(app: FastifyInstance, context: AppCo
     const [checkpoint] = await context.db
       .select()
       .from(checkpoints)
-      .where(and(eq(checkpoints.id, checkpointId), eq(checkpoints.projectId, projectId)))
+      .where(
+        and(
+          eq(checkpoints.id, checkpointId),
+          eq(checkpoints.projectId, projectId),
+          eq(checkpoints.target, 'accepted'),
+        ),
+      )
       .limit(1);
     if (!checkpoint) throw notFound('Checkpoint not found');
     const before = await createCheckpoint(context.db, projectId, 'restore');

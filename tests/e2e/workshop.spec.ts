@@ -49,15 +49,15 @@ test('verified user creates, edits, persists, and compiles a project', async ({
   await page.getByLabel('Project name').fill(projectName);
   await page.getByRole('button', { name: 'Create project' }).click();
   await expect(page.getByText(projectName)).toBeVisible();
-  await expect(page).toHaveTitle('main.tex — Editor | LaTeX Workshop');
+  await expect(page).toHaveTitle(`${projectName} - Latex Workshop`);
   await expect(page.getByText('TexLab ready')).toBeVisible({ timeout: 30_000 });
 
   await page.getByLabel('Project settings').click();
   await expect(page.getByRole('dialog', { name: 'Project settings' })).toBeVisible();
-  await page.getByRole('button', { name: 'Configure shortcuts' }).click();
+  await page.getByRole('button', { name: 'Open profile' }).click();
   const accountSettings = page.getByRole('dialog', { name: 'Account settings' });
   await expect(accountSettings).toBeVisible();
-  await expect(page).toHaveTitle('main.tex — Editor | LaTeX Workshop');
+  await expect(page).toHaveTitle(`${projectName} - Latex Workshop`);
   const paletteShortcut = page.locator('.shortcut-row').filter({ hasText: 'Open command palette' });
   await paletteShortcut.locator('.shortcut-binding').click();
   const shortcutRecorder = paletteShortcut.locator('.shortcut-recorder');
@@ -71,14 +71,14 @@ test('verified user creates, edits, persists, and compiles a project', async ({
   await page.getByRole('button', { name: 'Save', exact: true }).click();
   await expect(page.getByText('Keyboard shortcuts saved.')).toBeVisible();
   await accountSettings.getByRole('button', { name: 'Close' }).click();
-  await expect(page).toHaveTitle('main.tex — Editor | LaTeX Workshop');
+  await expect(page).toHaveTitle(`${projectName} - Latex Workshop`);
   await page.keyboard.press('Control+Enter');
   await expect(page.getByRole('dialog', { name: 'Command palette' })).toBeVisible();
   await page.keyboard.press('Escape');
   await page.keyboard.press('Control+K');
   await expect(page.getByRole('dialog', { name: 'Command palette' })).toHaveCount(0);
   await page.reload();
-  await expect(page).toHaveTitle('main.tex — Editor | LaTeX Workshop');
+  await expect(page).toHaveTitle(`${projectName} - Latex Workshop`);
   await expect(page.locator('.monaco-editor')).toBeVisible();
   await page.keyboard.press('Control+Enter');
   await expect(page.getByRole('dialog', { name: 'Command palette' })).toBeVisible();
@@ -89,7 +89,7 @@ test('verified user creates, edits, persists, and compiles a project', async ({
   const saveResetShortcuts = page.getByRole('button', { name: 'Save', exact: true });
   if (await saveResetShortcuts.isEnabled()) await saveResetShortcuts.click();
   await accountSettings.getByRole('button', { name: 'Close' }).click();
-  await expect(page).toHaveTitle('main.tex — Editor | LaTeX Workshop');
+  await expect(page).toHaveTitle(`${projectName} - Latex Workshop`);
   await expect(page.locator('.monaco-editor')).toBeVisible();
   await page.keyboard.press('Control+K');
   await expect(page.getByRole('dialog', { name: 'Command palette' })).toBeVisible();
@@ -234,7 +234,7 @@ test('verified user creates, edits, persists, and compiles a project', async ({
   });
   const otherPage = await otherDevice.newPage();
   await otherPage.goto(workspaceUrl);
-  await expect(otherPage).toHaveTitle('main.tex — Editor | LaTeX Workshop');
+  await expect(otherPage).toHaveTitle(`${projectName} - Latex Workshop`);
   await otherPage.getByLabel('Undo history').click();
   await expect
     .poll(() =>
@@ -248,13 +248,33 @@ test('verified user creates, edits, persists, and compiles a project', async ({
   await expect(page.getByLabel('Download PDF')).toBeVisible({ timeout: 120_000 });
   await expect(page.getByLabel('Open PDF in new tab')).toBeVisible();
 
+  const pdfLayerMetrics = await page
+    .locator('.pdfViewer .page')
+    .first()
+    .evaluate((pdfPage) => {
+      const canvas = pdfPage.querySelector('.canvasWrapper canvas');
+      const annotationLayer = pdfPage.querySelector('.annotationLayer');
+      if (!(canvas instanceof HTMLElement) || !(annotationLayer instanceof HTMLElement))
+        return null;
+      const canvasRect = canvas.getBoundingClientRect();
+      const annotationRect = annotationLayer.getBoundingClientRect();
+      return {
+        left: annotationRect.left - canvasRect.left,
+        top: annotationRect.top - canvasRect.top,
+        width: annotationRect.width - canvasRect.width,
+        height: annotationRect.height - canvasRect.height,
+      };
+    });
+  if (!pdfLayerMetrics) throw new Error('PDF canvas or annotation layer did not render');
+  for (const delta of Object.values(pdfLayerMetrics)) expect(Math.abs(delta)).toBeLessThan(1);
+
   const pdfFind = page.locator('.preview-toolbar').getByPlaceholder('Find');
   await pdfFind.fill('Acceptance');
   await expect(page.locator('.pdf-find-count')).not.toHaveText('—');
   await page.getByLabel('Next PDF match').click();
   await page.getByLabel('Previous PDF match').click();
   await pdfFind.fill('');
-  await expect(page.locator('.pdf-find-count')).toHaveText('—');
+  await expect(page.locator('.pdf-find-count')).toHaveCount(0);
 
   const forwardResponse = page.waitForResponse(
     (response) => /\/synctex\/forward$/.test(response.url()) && response.ok(),
@@ -292,7 +312,7 @@ test('verified user creates, edits, persists, and compiles a project', async ({
   await expect(page.getByLabel('Show PDF preview')).toBeVisible();
   await page.getByLabel('Show PDF preview').click();
   await expect(page.getByLabel('Hide PDF preview')).toBeVisible();
-  await expect(pdfPage).toHaveTitle(`${projectName} — PDF | LaTeX Workshop`);
+  await expect(pdfPage).toHaveTitle(`PDF - ${projectName} - Latex Workshop`);
   await pdfPage.close();
 
   const overleafExport = await makeZip([
@@ -399,7 +419,7 @@ test('library organizes projects with folders, tags, views, bulk actions, and re
   await expect(page.getByRole('radio', { name: /Aidan Template/ })).toBeChecked();
   await page.getByLabel('Project name').fill('From Aidan');
   await page.getByRole('button', { name: 'Create project' }).click();
-  await expect(page).toHaveTitle('template.tex — Editor | LaTeX Workshop');
+  await expect(page).toHaveTitle('From Aidan - Latex Workshop');
   await expect(page.getByText('Template', { exact: true })).toHaveCount(0);
   await page.getByLabel('Back to projects').click();
   await expect(page.getByText('From Aidan', { exact: true })).toBeVisible();

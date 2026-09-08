@@ -5,6 +5,7 @@ import type { Project } from '@latex-workshop/contracts';
 import { authClient } from '../lib/auth';
 import { PdfViewer } from '../features/pdf/PdfViewer';
 import { api, appPath, queryKeys } from '../lib/api';
+import { projectDocumentTitle } from '../lib/document-title';
 
 type ProjectPayload = { project: Project };
 
@@ -22,7 +23,7 @@ export default function PdfPage() {
   }, [session, isPending, navigate]);
   useEffect(() => {
     if (!project.data) return;
-    document.title = `${project.data.project.name} — PDF | LaTeX Workshop`;
+    document.title = projectDocumentTitle(project.data.project.name, 'pdf');
     return () => {
       document.title = 'LaTeX Workshop';
     };

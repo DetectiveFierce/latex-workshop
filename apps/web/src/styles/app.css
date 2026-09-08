@@ -1,6 +1,294 @@
 body {
   background-image: none;
 }
+
+.proposal-editor-dock {
+  position: absolute;
+  left: 50%;
+  bottom: 10px;
+  z-index: 12;
+  display: flex;
+  flex-direction: column-reverse;
+  align-items: center;
+  transform: translateX(-50%);
+  max-width: min(560px, calc(100% - 24px));
+}
+.proposal-editor-dock-surface {
+  display: inline-flex;
+  align-items: stretch;
+  overflow: hidden;
+  border: 1px solid var(--hon-border);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--hon-surface) 94%, transparent);
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(8px);
+}
+.proposal-editor-dock-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 0;
+  border-inline: 1px solid var(--hon-border);
+  background: transparent;
+  color: var(--hon-text-bright);
+  padding: 3px 8px;
+}
+.proposal-editor-decision.icon-button {
+  width: 28px;
+  height: 26px;
+  min-height: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+.proposal-editor-reject {
+  color: var(--hon-red);
+}
+.proposal-editor-accept {
+  color: var(--hon-green);
+}
+.proposal-editor-decision:disabled {
+  opacity: 0.35;
+}
+.proposal-count-add {
+  color: var(--hon-green);
+  font-variant-numeric: tabular-nums;
+}
+.proposal-count-del {
+  color: color-mix(in srgb, var(--hon-red) 55%, white);
+  font-variant-numeric: tabular-nums;
+}
+.proposal-editor-dock-panel {
+  width: 100%;
+  margin-bottom: 8px;
+  border: 1px solid var(--hon-border);
+  background: var(--hon-surface);
+  box-shadow: var(--shadow);
+  padding: 8px;
+  display: grid;
+  gap: 8px;
+  border-radius: 6px;
+}
+.proposal-editor-dock-context {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.proposal-hunk-nav {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 180px;
+  overflow: auto;
+  display: grid;
+  gap: 4px;
+}
+.proposal-hunk-nav button {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  text-align: left;
+  padding: 6px 8px;
+}
+.proposal-hunk-nav button.active {
+  outline: 2px solid var(--hon-green);
+}
+.proposal-hunk-nav-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.proposal-hunk-nav-row > button:first-child {
+  flex: 1;
+}
+.proposal-structural-actions {
+  display: inline-flex;
+  gap: 3px;
+}
+.proposal-structural-actions button {
+  width: auto;
+  padding: 6px;
+}
+.proposal-hunk-widget {
+  display: inline-flex;
+  gap: 4px;
+  margin-left: 2px;
+}
+.proposal-hunk-widget button {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid var(--hon-border);
+  background: var(--hon-surface);
+  color: var(--hon-text-bright);
+}
+.proposal-hunk-widget button:disabled {
+  opacity: 0.45;
+}
+.proposal-hunk-accept {
+  color: var(--hon-green);
+}
+.proposal-hunk-reject {
+  color: var(--hon-red);
+}
+.proposal-addition-line {
+  background: color-mix(in srgb, var(--hon-green) 16%, transparent);
+}
+.proposal-addition-gutter {
+  background: var(--hon-green);
+  width: 3px !important;
+  margin-left: 3px;
+}
+.proposal-deletion-zone {
+  position: relative;
+  z-index: 2;
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  text-align: left;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  white-space: pre;
+  color: color-mix(in srgb, var(--hon-red) 55%, white);
+  background: color-mix(in srgb, var(--hon-red) 14%, transparent);
+  text-decoration: line-through;
+  padding: 0 8px;
+  cursor: pointer;
+}
+
+.agent-connection-card {
+  display: grid;
+  gap: 10px;
+  border: 1px solid var(--hon-border);
+  background: var(--hon-app);
+  padding: 12px;
+  border-radius: var(--radius);
+}
+.agent-setup-card {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  color: var(--hon-text-bright);
+  background: color-mix(in srgb, var(--hon-cyan) 5%, var(--hon-app));
+  border: 1px solid color-mix(in srgb, var(--hon-cyan) 32%, var(--hon-border));
+  border-radius: var(--radius);
+}
+.agent-setup-card p,
+.agent-setup-card small {
+  margin: 4px 0 0;
+  color: var(--hon-muted);
+  line-height: 1.45;
+}
+.agent-endpoint-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.agent-endpoint-row code {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  padding: 9px 10px;
+  color: var(--hon-cyan);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  background: var(--hon-terminal);
+  border: 1px solid var(--hon-border);
+  border-radius: 6px;
+}
+.agent-connection-card > .hint {
+  overflow-wrap: anywhere;
+}
+.agent-project-picker {
+  display: grid;
+  gap: 6px;
+  max-height: 220px;
+  overflow: auto;
+  padding: 8px;
+  background: var(--hon-terminal);
+  border: 1px solid var(--hon-border);
+  border-radius: 6px;
+}
+.agent-project-picker > .agent-project-option:first-of-type {
+  margin-bottom: 2px;
+  border-bottom-color: var(--hon-active);
+}
+.agent-project-option {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  text-align: left;
+  padding: 8px 10px;
+  border: 1px solid var(--hon-border);
+  border-radius: 6px;
+  background: var(--hon-surface);
+  color: var(--hon-text);
+}
+.agent-project-option:hover:not(:disabled) {
+  background: var(--hon-surface-hover);
+  border-color: var(--hon-active);
+}
+.agent-project-option.selected {
+  border-color: var(--hon-green);
+  background: color-mix(in srgb, var(--hon-green) 12%, var(--hon-surface));
+  color: var(--hon-text-bright);
+}
+.agent-project-option:focus-visible {
+  outline: 2px solid var(--hon-green);
+  outline-offset: 1px;
+}
+.agent-project-mark {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
+  display: grid;
+  place-content: center;
+  border: 1px solid var(--hon-muted);
+  border-radius: 4px;
+  background: var(--hon-terminal);
+}
+.agent-project-mark.checked {
+  background: var(--hon-green);
+  border-color: var(--hon-green);
+}
+.agent-project-mark.checked::before {
+  content: '';
+  width: 8px;
+  height: 5px;
+  border: solid var(--hon-terminal);
+  border-width: 0 0 2px 2px;
+  transform: translateY(-1px) rotate(-45deg);
+}
+.tree-row.proposal-deleted > span:not(.badge) {
+  text-decoration: line-through;
+  opacity: 0.65;
+}
+.proposal-tree-badge {
+  margin-left: auto;
+  font-size: 0.62rem;
+}
+.tree-row.proposal-added {
+  color: var(--hon-green);
+}
+.proposal-preview-toggle {
+  display: inline-flex;
+  border: 1px solid var(--hon-border);
+  border-radius: 4px;
+  overflow: hidden;
+}
+.proposal-preview-toggle button {
+  border: 0;
+  padding: 3px 7px;
+  background: transparent;
+  color: inherit;
+}
+.proposal-preview-toggle button.active {
+  background: var(--hon-green);
+  color: var(--hon-terminal);
+}
+
 .sr-only {
   position: absolute !important;
   width: 1px;
@@ -253,8 +541,8 @@ p {
   position: fixed;
   inset: 0;
   z-index: 100;
-  background: #070b02bb;
-  backdrop-filter: blur(4px);
+  background: #070b02e0;
+  will-change: opacity;
   animation: fade 0.15s ease;
 }
 .dialog-content {
@@ -721,8 +1009,8 @@ p {
 }
 .dropdown {
   z-index: 90;
-  min-width: 190px;
-  padding: 5px;
+  min-width: 208px;
+  padding: 6px;
   color: var(--hon-text);
   background: var(--hon-terminal);
   border: 1px solid var(--hon-border);
@@ -734,11 +1022,11 @@ p {
 }
 .dropdown-item {
   width: 100%;
-  min-height: 34px;
+  min-height: 36px;
   display: flex;
   align-items: center;
-  gap: 9px;
-  padding: 0 9px;
+  gap: 10px;
+  padding: 0 10px;
   border: 0;
   border-radius: 5px;
   color: var(--hon-text-bright);
@@ -815,7 +1103,10 @@ p {
 .workspace-toolbar-extras {
   display: flex;
   align-items: center;
-  gap: 2px;
+  gap: 3px;
+  margin-left: 3px;
+  padding-left: 6px;
+  border-left: 1px solid color-mix(in srgb, var(--hon-border) 72%, transparent);
 }
 .workspace-toolbar .project-title {
   min-width: 0;
@@ -1264,20 +1555,28 @@ p {
   position: absolute;
   z-index: 4;
   pointer-events: none;
-  background: color-mix(in srgb, var(--hon-green) 10%, transparent);
-  border-radius: 2px;
-  outline: 2px solid color-mix(in srgb, var(--hon-green) 78%, transparent);
-  outline-offset: 1px;
+  background: color-mix(in srgb, var(--hon-green) 16%, transparent);
+  border-radius: 3px;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--hon-green) 48%, transparent);
   mix-blend-mode: multiply;
 }
 .synctex-highlight-approximate {
-  background: color-mix(in srgb, var(--hon-warning) 9%, transparent);
-  outline-color: color-mix(in srgb, var(--hon-warning) 82%, transparent);
-  outline-style: dashed;
+  background: color-mix(in srgb, var(--hon-yellow) 12%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--hon-yellow) 56%, transparent);
+}
+.pdf-container .canvasWrapper,
+.pdf-container .textLayer,
+.pdf-container .annotationLayer,
+.pdf-container .annotationEditorLayer,
+.pdf-container .textLayer * {
+  /* These dimensions are the PDF viewport itself. Isolate them from the app-wide border-box
+     reset, but leave annotation sections alone: PDF.js intentionally sizes those as border-box. */
+  box-sizing: content-box;
 }
 .pdf-container .textLayer .highlight {
-  --highlight-bg-color: rgb(244 194 13 / 0.14);
-  --highlight-selected-bg-color: rgb(92 184 92 / 0.2);
+  --highlight-bg-color: rgb(230 219 116 / 0.18);
+  --highlight-selected-bg-color: rgb(166 226 46 / 0.28);
+  border-radius: 2px;
 }
 /* Keep native PDF text selection translucent so it doesn't obscure the canvas. */
 .pdf-container .textLayer span::selection {
@@ -1288,6 +1587,25 @@ p {
   color: transparent;
   background: rgb(166 226 46 / 0.24);
 }
+.pdf-container .annotationLayer .linkAnnotation {
+  outline: none !important;
+}
+.pdf-container .annotationLayer .linkAnnotation.hasBorder {
+  background: none !important;
+  border-color: transparent !important;
+}
+.pdf-container .annotationLayer .linkAnnotation > a,
+.pdf-container .annotationLayer .linkAnnotation > a:hover {
+  opacity: 1;
+  background: transparent;
+  box-shadow: none;
+  border-radius: 2px;
+}
+.pdf-container .annotationLayer .linkAnnotation > a:hover,
+.pdf-container .annotationLayer .linkAnnotation > a:focus-visible {
+  background: color-mix(in srgb, var(--hon-cyan) 9%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--hon-cyan) 42%, transparent);
+}
 .pdf-sync-status {
   position: absolute;
   z-index: 6;
@@ -1296,7 +1614,7 @@ p {
   padding: 7px 10px;
   color: var(--hon-text-bright);
   background: color-mix(in srgb, var(--hon-terminal) 92%, transparent);
-  border: 1px solid var(--hon-warning);
+  border: 1px solid var(--hon-yellow);
   border-radius: 6px;
   font-size: calc(11px * var(--ui-font-scale));
   pointer-events: none;
@@ -1548,6 +1866,55 @@ p {
     monospace;
 }
 
+.project-search .searchbox {
+  max-width: none;
+}
+.project-search-summary {
+  min-height: 28px;
+  padding: 8px 2px 4px;
+  color: var(--hon-muted);
+  font-size: calc(12px * var(--ui-font-scale));
+}
+.project-search-results {
+  max-height: min(55vh, 520px);
+  overflow: auto;
+  padding: 4px;
+  background: var(--hon-terminal);
+  border: 1px solid var(--hon-border);
+  border-radius: 7px;
+}
+.project-search-results button {
+  width: 100%;
+  display: grid;
+  gap: 5px;
+  padding: 9px 10px;
+  color: var(--hon-text);
+  background: none;
+  border: 0;
+  border-radius: 5px;
+  text-align: left;
+}
+.project-search-results button.active {
+  color: var(--hon-text-bright);
+  background: var(--hon-active);
+}
+.project-search-location {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+}
+.project-search-location span {
+  color: var(--hon-muted);
+  font-size: calc(11px * var(--ui-font-scale));
+}
+.project-search-results code {
+  overflow: hidden;
+  color: inherit;
+  font-size: calc(12px * var(--editor-font-scale));
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .history-layout {
   height: min(65vh, 620px);
   display: grid;
@@ -1728,7 +2095,7 @@ p {
   text-align: center;
 }
 .shortcut-warning {
-  color: var(--hon-warning);
+  color: var(--hon-yellow);
   white-space: nowrap;
 }
 .shortcut-recorder .button {
@@ -1754,7 +2121,7 @@ p {
 }
 .shortcut-conflict {
   padding: 10px;
-  border: 1px solid var(--hon-warning);
+  border: 1px solid var(--hon-yellow);
   border-radius: 8px;
 }
 .shortcut-conflict span,

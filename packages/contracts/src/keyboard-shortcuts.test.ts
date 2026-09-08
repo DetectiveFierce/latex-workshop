@@ -29,11 +29,13 @@ describe('keyboard shortcuts', () => {
     expect(resolved['workspace.compile']).toBe('Ctrl+KeyR');
     expect(resolved['workspace.save']).toBeNull();
     expect(resolved['workspace.commandPalette']).toBe('Ctrl+KeyK');
+    expect(resolved['workspace.projectSearch']).toBe('Ctrl+Shift+KeyF');
     expect(resolved['editor.deleteLine']).toBe('Ctrl+KeyD');
     expect(resolved['editor.nextOccurrence']).toBeNull();
   });
 
   it('uses platform-specific defaults', () => {
+    expect(resolveShortcutBindings({}, true)['workspace.projectSearch']).toBe('Meta+Shift+KeyF');
     expect(resolveShortcutBindings({}, true)['editor.wordLeft']).toBe('Alt+ArrowLeft');
     expect(resolveShortcutBindings({}, false)['editor.wordLeft']).toBe('Ctrl+ArrowLeft');
   });

@@ -357,7 +357,12 @@ export async function registerEditHistoryRoutes(app: FastifyInstance, context: A
   );
 }
 
-async function ensureHistoryRoot(context: AppContext, projectId: string, entryId: string) {
+export async function ensureHistoryRoot(
+  context: AppContext,
+  projectId: string,
+  entryId: string,
+  initial?: { summary: string; clientMutationId: string },
+) {
   const state = await currentState(context, entryId);
   if (state) {
     const [node] = await context.db
@@ -382,8 +387,8 @@ async function ensureHistoryRoot(context: AppContext, projectId: string, entryId
       afterHash: file.blob.hash,
       patch: [],
       snapshotObjectKey,
-      summary: 'History started',
-      clientMutationId: randomUUID(),
+      summary: initial?.summary ?? 'History started',
+      clientMutationId: initial?.clientMutationId ?? randomUUID(),
     })
     .returning();
   const insertedState = await context.db
@@ -504,7 +509,7 @@ export function reconstructHistoryContent(
   return content;
 }
 
-async function createHistoryNode(
+export async function createHistoryNode(
   context: AppContext,
   input: {
     projectId: string;

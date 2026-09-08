@@ -33,6 +33,13 @@ const envSchema = z.object({
   MAX_PROJECT_BYTES: positiveInteger.default(262_144_000),
   MAX_FILE_BYTES: positiveInteger.default(52_428_800),
   SESSION_IDLE_MS: positiveInteger.default(900_000),
+  AGENT_MCP_ENABLED: bool.default(false),
+  AGENT_MCP_RESOURCE_URL: optionalUrl,
+  AGENT_MCP_DCR_ENABLED: bool.default(false),
+  AGENT_MCP_ACCESS_TOKEN_TTL_SECONDS: positiveInteger.default(3_600),
+  AGENT_MCP_REFRESH_TOKEN_TTL_DAYS: positiveInteger.max(3_650).default(365),
+  AGENT_MCP_READS_PER_MINUTE: positiveInteger.default(120),
+  AGENT_MCP_WRITES_PER_MINUTE: positiveInteger.default(30),
 });
 
 export type AppConfig = z.infer<typeof envSchema>;
@@ -73,5 +80,13 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     [config.WEB_ORIGIN, config.API_ORIGIN].some((origin) => new URL(origin).protocol !== 'https:')
   )
     throw new Error('WEB_ORIGIN and API_ORIGIN must use HTTPS in production');
+  if (config.AGENT_MCP_ENABLED && !config.AGENT_MCP_RESOURCE_URL)
+    throw new Error('AGENT_MCP_RESOURCE_URL is required when AGENT_MCP_ENABLED=true');
+  if (
+    config.NODE_ENV === 'production' &&
+    config.AGENT_MCP_ENABLED &&
+    new URL(config.AGENT_MCP_RESOURCE_URL ?? '').protocol !== 'https:'
+  )
+    throw new Error('AGENT_MCP_RESOURCE_URL must use HTTPS in production');
   return config;
 }

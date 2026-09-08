@@ -86,6 +86,42 @@ tailscale serve status
 Do not use Funnel. The expected origins must be full HTTPS `*.ts.net` URLs; the S3 public endpoint
 uses port `8443` so browser-direct signed uploads do not create mixed-content failures.
 
+## Private MCP ingress
+
+To allow a remote agent harness, set these values in the host `.env` before deploying:
+
+```dotenv
+AGENT_MCP_ENABLED=true
+AGENT_MCP_RESOURCE_URL=https://latex-workshop.example.com/api/mcp
+AGENT_MCP_DCR_ENABLED=false
+AGENT_MCP_ACCESS_TOKEN_TTL_SECONDS=3600
+AGENT_MCP_REFRESH_TOKEN_TTL_DAYS=365
+AGENT_MCP_READS_PER_MINUTE=120
+AGENT_MCP_WRITES_PER_MINUTE=30
+```
+
+The public ingress must send `/api/mcp`, `/api/auth/*`, and every `/.well-known/*` request to the API
+while normal application routes continue to the web tier. The bundled nginx configuration already
+does this. Preserve the original host and scheme through the trusted proxy so OAuth issuer,
+resource, redirect, and discovery URLs remain identical. A hosted MCP client cannot connect to a
+loopback or tailnet-only address; use a deliberately exposed HTTPS hostname or a secure development
+tunnel. DCR materially expands the registration surface and should remain disabled unless the
+specific client requires it.
+
+Compiled-page image inspection uses Ghostscript inside the same isolated worker-side image selected
+by `COMPILE_IMAGE`. Custom TeX images must therefore provide a `gs` executable in addition to the
+supported LaTeX engines. The bundled `infra/texlive` image already includes it.
+
+After connection, the browser returns to `/oauth/consent`, where the signed `oauth_query` is carried
+through login and consent. Select at least one active project, approve, then manage or revoke the
+connection under Account settings → Agent access.
+
+Access tokens remain short-lived. Harnesses that request `offline_access` receive rotating refresh
+credentials with a one-year sliding lifetime by default, so an actively used Codex, Pi, or Grok
+connection stays authorized until the owner revokes it. Each machine keeps its own credential and
+performs its own OAuth handshake; do not copy raw token-store files between devices. Reconnecting a
+known client preselects its existing project policy on the consent screen.
+
 ## Backup and restore
 
 Run `infra/self-host/backup.sh` daily. It briefly drains the three write-producing application

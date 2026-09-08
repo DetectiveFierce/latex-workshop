@@ -24,6 +24,11 @@ import {
 } from '@latex-workshop/db';
 import { ObjectStorage } from '@latex-workshop/storage';
 import { LspFrameDecoder, LspFrameError } from './lsp-framing.js';
+import {
+  applyLspContentChanges,
+  LatexNavigationIndex,
+  type LspPosition,
+} from './latex-navigation.js';
 
 const config = loadConfig();
 const { db, client } = createDatabase(config.DATABASE_URL);
@@ -107,6 +112,7 @@ sockets.on(
 
 async function bridgeTexLab(socket: WebSocket, projectId: string) {
   const workspace = await mkdtemp(join(tmpdir(), 'latex-lsp-'));
+  const navigation = new LatexNavigationIndex();
   let processHandle: ChildProcessWithoutNullStreams | null = null;
   let idleTimer: NodeJS.Timeout | null = null;
   let socketClosed = false;
@@ -142,7 +148,10 @@ async function bridgeTexLab(socket: WebSocket, projectId: string) {
       if (!path) throw new Error('Language-service file path is missing');
       const target = join(workspace, path);
       await mkdir(dirname(target), { recursive: true });
-      await writeFile(target, await storage.getBuffer(row.blob.objectKey));
+      const contents = await storage.getBuffer(row.blob.objectKey);
+      await writeFile(target, contents);
+      if (/\.(?:tex|sty|cls)$/i.test(path))
+        navigation.upsert(pathToFileURL(join('/workspace', path)).href, contents.toString('utf8'));
     }
 
     processHandle = spawn('texlab', ['run'], {
@@ -154,12 +163,13 @@ async function bridgeTexLab(socket: WebSocket, projectId: string) {
     const decoder = new LspFrameDecoder();
     forwardMessage = (message: string) => {
       try {
-        const parsed = JSON.parse(message) as { method?: string; id?: string | number };
+        const parsed = record(JSON.parse(message));
+        if (!parsed) return;
         if (
           parsed.method === 'textDocument/build' ||
           parsed.method === 'workspace/executeCommand'
         ) {
-          if (parsed.id !== undefined)
+          if (isRpcId(parsed.id))
             socket.send(
               JSON.stringify({
                 jsonrpc: '2.0',
@@ -170,6 +180,12 @@ async function bridgeTexLab(socket: WebSocket, projectId: string) {
                 },
               }),
             );
+          return;
+        }
+        synchronizeNavigationDocument(navigation, parsed);
+        const response = navigationResponse(navigation, parsed);
+        if (response) {
+          socket.send(JSON.stringify(response));
           return;
         }
       } catch {
@@ -210,6 +226,70 @@ async function bridgeTexLab(socket: WebSocket, projectId: string) {
     processHandle?.kill('SIGKILL');
     await rm(workspace, { recursive: true, force: true });
   }
+}
+
+function synchronizeNavigationDocument(
+  navigation: LatexNavigationIndex,
+  message: Record<string, unknown>,
+) {
+  const params = record(message.params);
+  const textDocument = record(params?.textDocument);
+  const uri = textDocument?.uri;
+  if (typeof uri !== 'string' || !isWorkspaceLatexUri(uri)) return;
+  if (message.method === 'textDocument/didOpen' && typeof textDocument?.text === 'string') {
+    navigation.upsert(uri, textDocument.text);
+    return;
+  }
+  if (message.method === 'textDocument/didSave' && typeof params?.text === 'string') {
+    navigation.upsert(uri, params.text);
+    return;
+  }
+  if (message.method !== 'textDocument/didChange' || !Array.isArray(params?.contentChanges)) return;
+  const current = navigation.text(uri);
+  if (current === undefined) return;
+  const changed = applyLspContentChanges(current, params.contentChanges);
+  if (changed !== null) navigation.upsert(uri, changed);
+}
+
+function navigationResponse(navigation: LatexNavigationIndex, message: Record<string, unknown>) {
+  if (!isRpcId(message.id)) return null;
+  const params = record(message.params);
+  const textDocument = record(params?.textDocument);
+  const uri = textDocument?.uri;
+  const position = lspPosition(params?.position);
+  if (typeof uri !== 'string' || !position) return null;
+  if (message.method === 'textDocument/definition') {
+    const result = navigation.definition(uri, position);
+    return result ? { jsonrpc: '2.0' as const, id: message.id, result } : null;
+  }
+  if (message.method === 'textDocument/references') {
+    const context = record(params?.context);
+    const result = navigation.references(uri, position, context?.includeDeclaration === true);
+    return result ? { jsonrpc: '2.0' as const, id: message.id, result } : null;
+  }
+  return null;
+}
+
+function lspPosition(value: unknown): LspPosition | null {
+  const candidate = record(value);
+  if (!candidate) return null;
+  return typeof candidate.line === 'number' && typeof candidate.character === 'number'
+    ? { line: candidate.line, character: candidate.character }
+    : null;
+}
+
+function isWorkspaceLatexUri(uri: string) {
+  return uri.startsWith('file:///workspace/') && /\.(?:tex|sty|cls)$/i.test(uri);
+}
+
+function isRpcId(value: unknown): value is string | number {
+  return typeof value === 'string' || typeof value === 'number';
+}
+
+function record(value: unknown): Record<string, unknown> | null {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
 }
 
 function reject(socket: import('node:stream').Duplex, status: number, message: string) {

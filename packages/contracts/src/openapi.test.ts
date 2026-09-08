@@ -14,5 +14,16 @@ describe('OpenAPI contract', () => {
     expect(document.components.schemas.LibraryResponse).toBeDefined();
     expect(document.components.schemas.TemplateListResponse).toBeDefined();
     expect(document.paths['/api/v1/templates']).toBeDefined();
+    expect(document.paths['/api/v1/agent-connections']).toBeDefined();
+    expect(document.paths['/api/v1/agent-connections/client']).toBeDefined();
+    expect(document.paths['/api/v1/projects/{projectId}/proposals/active']).toBeDefined();
+    expect(
+      document.paths['/api/v1/projects/{projectId}/proposals/{proposalId}/files'],
+    ).toBeDefined();
+    expect(
+      document.paths['/api/v1/projects/{projectId}/proposals/{proposalId}/hunks/{hunkId}'],
+    ).toBeDefined();
+    expect(document.components.schemas.AgentProposalFile).toBeDefined();
+    expect(document.components.schemas.ReviseAgentProposalHunk).toBeDefined();
   });
 });

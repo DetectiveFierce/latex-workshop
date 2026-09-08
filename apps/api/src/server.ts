@@ -1,5 +1,6 @@
-import Fastify from 'fastify';
+import Fastify, { type FastifyReply, type FastifyRequest } from 'fastify';
 import cors from '@fastify/cors';
+import formbody from '@fastify/formbody';
 import helmet from '@fastify/helmet';
 import multipart from '@fastify/multipart';
 import rateLimit from '@fastify/rate-limit';
@@ -11,8 +12,14 @@ import { loadConfig } from '@latex-workshop/config';
 import { buildOpenApiDocument } from '@latex-workshop/contracts';
 import { createContext } from './lib/context.js';
 import { HttpError } from './lib/errors.js';
+import { serializeAuthProxyBody } from './lib/auth-proxy-body.js';
+import { codexCompatibleAuthorizationMetadata } from './lib/oauth-metadata-compat.js';
 import { startMaintenance } from './lib/maintenance.js';
-import { publicRequestUrl } from './lib/public-request-url.js';
+import {
+  publicAuthBasePath,
+  publicRequestUrl,
+  publicWellKnownUrl,
+} from './lib/public-request-url.js';
 import { renderOperationalMetrics } from './lib/operational-metrics.js';
 import { scheduleTemplatePreview } from './lib/template-previews.js';
 import { registerCompileRoutes } from './routes/compiles.js';
@@ -23,6 +30,8 @@ import { registerTransferRoutes } from './routes/transfers.js';
 import { registerTemplateRoutes } from './routes/templates.js';
 import { registerPreferenceRoutes } from './routes/preferences.js';
 import { registerEditHistoryRoutes } from './routes/edit-history.js';
+import { registerMcpRoutes } from './routes/mcp.js';
+import { registerAgentProposalRoutes } from './routes/agent-proposals.js';
 
 export async function buildServer() {
   const config = loadConfig();
@@ -65,6 +74,7 @@ export async function buildServer() {
     crossOriginEmbedderPolicy: false,
   });
   await app.register(rateLimit, { global: true, max: 300, timeWindow: '1 minute' });
+  await app.register(formbody);
   await app.register(multipart, { limits: { fileSize: config.MAX_PROJECT_BYTES, files: 1 } });
   app.addHook('onResponse', async (request, reply) => {
     if (request.method === 'GET' || request.method === 'HEAD' || reply.statusCode >= 400) return;
@@ -77,32 +87,58 @@ export async function buildServer() {
   });
   await app.register(swaggerUi, { routePrefix: '/api/docs' });
 
+  const proxyAuth = async (request: FastifyRequest, reply: FastifyReply) => {
+    const headers = new Headers();
+    for (const [key, value] of Object.entries(request.headers)) {
+      if (value !== undefined) headers.set(key, Array.isArray(value) ? value.join(', ') : value);
+    }
+    headers.set('x-client-ip', request.ip);
+    // Fastify has already consumed the incoming stream. Reconstruct the representation
+    // Better Auth expects, especially OAuth's required form-encoded token requests.
+    headers.delete('content-length');
+    const incomingUrl = request.raw.url ?? '/';
+    const publicUrl = incomingUrl.startsWith('/.well-known/')
+      ? publicWellKnownUrl(config.API_ORIGIN, incomingUrl)
+      : publicRequestUrl(config.API_ORIGIN, incomingUrl);
+    const body =
+      request.method !== 'GET' && request.method !== 'HEAD'
+        ? serializeAuthProxyBody(request.headers['content-type'], request.body)
+        : undefined;
+    const response = await context.auth.handler(
+      new Request(publicUrl, {
+        method: request.method,
+        headers,
+        ...(body === undefined ? {} : { body }),
+      }),
+    );
+    reply.code(response.status);
+    for (const [key, value] of response.headers.entries())
+      if (key !== 'set-cookie') reply.header(key, value);
+    const cookies = response.headers.getSetCookie();
+    if (cookies.length) reply.header('set-cookie', cookies);
+    const responseBody = new Uint8Array(await response.arrayBuffer());
+    return reply.send(Buffer.from(codexCompatibleAuthorizationMetadata(incomingUrl, responseBody)));
+  };
   app.route({
     method: ['GET', 'POST'],
     url: '/api/auth/*',
-    handler: async (request, reply) => {
-      const headers = new Headers();
-      for (const [key, value] of Object.entries(request.headers)) {
-        if (value !== undefined) headers.set(key, Array.isArray(value) ? value.join(', ') : value);
-      }
-      headers.set('x-client-ip', request.ip);
-      const response = await context.auth.handler(
-        new Request(publicRequestUrl(config.API_ORIGIN, request.raw.url ?? '/'), {
-          method: request.method,
-          headers,
-          ...(request.method !== 'GET' && request.method !== 'HEAD' && request.body !== undefined
-            ? { body: JSON.stringify(request.body) }
-            : {}),
-        }),
-      );
-      reply.code(response.status);
-      for (const [key, value] of response.headers.entries())
-        if (key !== 'set-cookie') reply.header(key, value);
-      const cookies = response.headers.getSetCookie();
-      if (cookies.length) reply.header('set-cookie', cookies);
-      return reply.send(Buffer.from(await response.arrayBuffer()));
-    },
+    handler: proxyAuth,
   });
+  if (config.AGENT_MCP_ENABLED) {
+    const resourcePath = new URL(
+      config.AGENT_MCP_RESOURCE_URL ?? publicRequestUrl(config.API_ORIGIN, '/api/mcp').href,
+    ).pathname.replace(/\/+$/, '');
+    for (const path of new Set([
+      '/.well-known/oauth-protected-resource',
+      '/.well-known/oauth-protected-resource/api/mcp',
+      `/.well-known/oauth-protected-resource${resourcePath}`,
+      '/.well-known/oauth-authorization-server/api/auth',
+      `/.well-known/oauth-authorization-server${publicAuthBasePath(config.API_ORIGIN)}`,
+      '/api/auth/.well-known/oauth-authorization-server',
+      '/api/auth/.well-known/openid-configuration',
+    ]))
+      app.route({ method: ['GET', 'HEAD'], url: path, handler: proxyAuth });
+  }
 
   app.get('/health/live', async () => ({ status: 'ok', service: 'api' }));
   app.get('/health/ready', async (_request, reply) => {
@@ -117,13 +153,21 @@ export async function buildServer() {
     }
   });
   app.get('/metrics', async (_request, reply) => {
-    const counts = await context.queue.getJobCounts('waiting', 'active', 'completed', 'failed');
+    const [counts, renderCounts] = await Promise.all([
+      context.queue.getJobCounts('waiting', 'active', 'completed', 'failed'),
+      context.pdfRenderQueue.getJobCounts('waiting', 'active', 'completed', 'failed'),
+    ]);
     reply.type('text/plain; version=0.0.4');
     return [
       '# HELP latex_compile_jobs Number of compilation jobs by state',
       '# TYPE latex_compile_jobs gauge',
       ...Object.entries(counts).map(
         ([state, count]) => `latex_compile_jobs{state="${state}"} ${count}`,
+      ),
+      '# HELP latex_pdf_render_jobs Number of PDF page render jobs by state',
+      '# TYPE latex_pdf_render_jobs gauge',
+      ...Object.entries(renderCounts).map(
+        ([state, count]) => `latex_pdf_render_jobs{state="${state}"} ${count}`,
       ),
       ...renderOperationalMetrics(),
     ].join('\n');
@@ -137,6 +181,8 @@ export async function buildServer() {
   await registerTemplateRoutes(app, context);
   await registerPreferenceRoutes(app, context);
   await registerEditHistoryRoutes(app, context);
+  await registerMcpRoutes(app, context);
+  await registerAgentProposalRoutes(app, context);
   const stopMaintenance =
     config.NODE_ENV === 'test' ? () => undefined : startMaintenance(context, app.log);
 
@@ -198,6 +244,7 @@ export async function buildServer() {
   app.addHook('onClose', async () => {
     stopMaintenance();
     await context.queue.close();
+    await context.pdfRenderQueue.close();
     await context.redis.quit();
     await context.client.end();
   });

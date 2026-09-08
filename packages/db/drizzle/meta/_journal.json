@@ -64,6 +64,41 @@
       "when": 1788440000000,
       "tag": "0008_personal_project_templates",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1788479710497,
+      "tag": "0009_chubby_veda",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1788480459885,
+      "tag": "0010_lazy_spencer_smythe",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1788482976957,
+      "tag": "0011_chunky_black_widow",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1788494000000,
+      "tag": "0012_agent_all_projects",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1788500551745,
+      "tag": "0013_dazzling_the_twelve",
+      "breakpoints": true
     }
   ]
 }

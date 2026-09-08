@@ -31,6 +31,12 @@ import 'pdfjs-dist/web/pdf_viewer.css';
 import { IconButton } from '../../components/Button';
 import { viewportPointToSync } from './pdfCoordinates';
 import { PdfHighlightManager } from './pdfHighlightManager';
+import {
+  capturePdfViewport,
+  parsePdfViewportState,
+  restorePdfViewport,
+  type PdfViewportState,
+} from './pdfViewportState';
 
 pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
 
@@ -65,6 +71,12 @@ export function PdfViewer({
   const instanceRef = useRef<PdfJsViewer | null>(null);
   const linkServiceRef = useRef<PDFLinkService | null>(null);
   const highlightManagerRef = useRef<PdfHighlightManager | null>(null);
+  const activeTaskRef = useRef<pdfjs.PDFDocumentLoadingTask | null>(null);
+  const pendingViewportRef = useRef<PdfViewportState | null>(null);
+  const restoreFrameRef = useRef<number | null>(null);
+  const suppressPersistenceRef = useRef(true);
+  const storageKeyRef = useRef(storageKey);
+  const onPageChangeRef = useRef(onPageChange);
   const [documentProxy, setDocumentProxy] = useState<pdfjs.PDFDocumentProxy | null>(null);
   const [outline, setOutline] = useState<OutlineItem[]>([]);
   const [sidebar, setSidebar] = useState<'thumbnails' | 'outline' | null>(null);
@@ -78,19 +90,15 @@ export function PdfViewer({
   const [findCount, setFindCount] = useState({ current: 0, total: 0 });
   const [renderVersion, setRenderVersion] = useState(0);
 
+  storageKeyRef.current = storageKey;
+  onPageChangeRef.current = onPageChange;
+
   useEffect(() => {
     const container = containerRef.current;
     const viewerElement = viewerRef.current;
     if (!container || !viewerElement) return;
 
     let cancelled = false;
-    let loadedDocument: pdfjs.PDFDocumentProxy | null = null;
-    setError('');
-    setDocumentProxy(null);
-    setOutline([]);
-    setPages(0);
-    setPage(1);
-
     const eventBus = new EventBus();
     const linkService = new PDFLinkService({ eventBus });
     const findController = new PDFFindController({ eventBus, linkService });
@@ -103,6 +111,10 @@ export function PdfViewer({
       textLayerMode: 1,
       annotationMode: 2,
       enableSelectionRendering: false,
+      // Keep the page viewport, canvas, text layer, and annotation layer on one coordinate plane.
+      // PDF.js's decorative page border otherwise participates in its fit calculations while the
+      // app's global border-box reset changes which dimensions are available to child layers.
+      removePageBorders: true,
     });
     instanceRef.current = viewer;
     highlightManagerRef.current = new PdfHighlightManager(container, viewer);
@@ -110,57 +122,54 @@ export function PdfViewer({
     linkService.setViewer(viewer);
     const resizeObserver = new ResizeObserver(() => setRenderVersion((value) => value + 1));
     resizeObserver.observe(container);
+    viewerElement.style.visibility = 'hidden';
+    let persistFrame: number | null = null;
 
-    const task = pdfjs.getDocument({ url, withCredentials: true });
-    task.promise
-      .then(async (document) => {
-        if (cancelled) {
-          void document.cleanup();
-          return;
-        }
-        loadedDocument = document;
-        viewer.setDocument(document);
-        linkService.setDocument(document);
-        setDocumentProxy(document);
-        setPages(document.numPages);
-        setError('');
-        const nextOutline = (await document.getOutline()) ?? [];
-        if (!cancelled) setOutline(nextOutline);
-      })
-      .catch((cause) => {
-        if (cancelled || isAbortError(cause)) return;
-        setError(cause instanceof Error ? cause.message : 'Unable to load PDF');
+    const persistViewport = () => {
+      const key = storageKeyRef.current;
+      if (suppressPersistenceRef.current || !key || viewer.pagesCount === 0) return;
+      writePdfState(key, capturePdfViewport(container, viewer));
+    };
+    const schedulePersistViewport = () => {
+      if (suppressPersistenceRef.current || persistFrame !== null) return;
+      persistFrame = window.requestAnimationFrame(() => {
+        persistFrame = null;
+        persistViewport();
       });
+    };
 
     eventBus.on('pagesinit', () => {
       if (cancelled) return;
-      const saved = storageKey ? readPdfState(storageKey) : null;
-      viewer.currentScaleValue = saved?.scale ?? 'page-width';
-      if (saved?.page) {
-        viewer.currentPageNumber = Math.min(saved.page, viewer.pagesCount || saved.page);
-      }
-      setScale(viewer.currentScale);
-      setPage(viewer.currentPageNumber);
-      onPageChange?.(viewer.currentPageNumber);
-      setRenderVersion((value) => value + 1);
+      const saved = storageKeyRef.current ? readPdfState(storageKeyRef.current) : null;
+      const viewport = pendingViewportRef.current ?? saved ?? defaultPdfViewport();
+      restorePdfViewport(container, viewer, viewport);
+      if (restoreFrameRef.current !== null) window.cancelAnimationFrame(restoreFrameRef.current);
+      restoreFrameRef.current = window.requestAnimationFrame(() => {
+        if (cancelled) return;
+        restorePdfViewport(container, viewer, viewport);
+        pendingViewportRef.current = null;
+        suppressPersistenceRef.current = false;
+        viewerElement.style.visibility = '';
+        setScale(viewer.currentScale);
+        setPage(viewer.currentPageNumber);
+        onPageChangeRef.current?.(viewer.currentPageNumber);
+        persistViewport();
+        setRenderVersion((value) => value + 1);
+      });
     });
     eventBus.on('pagechanging', ({ pageNumber }: { pageNumber: number }) => {
       if (cancelled) return;
       setPage(pageNumber);
-      onPageChange?.(pageNumber);
-      if (storageKey)
-        writePdfState(storageKey, { page: pageNumber, scale: viewer.currentScaleValue });
+      onPageChangeRef.current?.(pageNumber);
+      schedulePersistViewport();
     });
     eventBus.on('scalechanging', ({ scale: next }: { scale: number }) => {
       if (cancelled) return;
       setScale(next);
-      if (storageKey)
-        writePdfState(storageKey, {
-          page: viewer.currentPageNumber,
-          scale: viewer.currentScaleValue,
-        });
+      schedulePersistViewport();
       setRenderVersion((value) => value + 1);
     });
+    container.addEventListener('scroll', schedulePersistViewport, { passive: true });
     eventBus.on('pagerendered', () => setRenderVersion((value) => value + 1));
     eventBus.on(
       'updatefindmatchescount',
@@ -172,26 +181,78 @@ export function PdfViewer({
     });
 
     return () => {
+      persistViewport();
       cancelled = true;
+      container.removeEventListener('scroll', schedulePersistViewport);
       resizeObserver.disconnect();
+      if (persistFrame !== null) window.cancelAnimationFrame(persistFrame);
+      if (restoreFrameRef.current !== null) window.cancelAnimationFrame(restoreFrameRef.current);
       instanceRef.current = null;
       highlightManagerRef.current?.dispose();
       highlightManagerRef.current = null;
       linkServiceRef.current = null;
-      setDocumentProxy(null);
       // pdf.js accepts null at runtime to detach the current document.
       viewer.setDocument(null as unknown as pdfjs.PDFDocumentProxy);
       linkService.setDocument(null);
-      void task.destroy();
-      if (loadedDocument) void loadedDocument.cleanup();
+      void activeTaskRef.current?.destroy();
+      activeTaskRef.current = null;
       viewer.cleanup();
     };
-  }, [onPageChange, storageKey, url]);
+  }, []);
+
+  useEffect(() => {
+    const container = containerRef.current;
+    const viewerElement = viewerRef.current;
+    const viewer = instanceRef.current;
+    const linkService = linkServiceRef.current;
+    if (!container || !viewerElement || !viewer || !linkService) return;
+
+    let cancelled = false;
+    const task = pdfjs.getDocument({ url, withCredentials: true });
+    setError('');
+    task.promise
+      .then(async (document) => {
+        if (cancelled) {
+          void task.destroy();
+          return;
+        }
+
+        if (viewer.pagesCount > 0) {
+          pendingViewportRef.current = capturePdfViewport(container, viewer);
+        }
+        suppressPersistenceRef.current = true;
+        viewerElement.style.visibility = 'hidden';
+        const previousTask = activeTaskRef.current;
+        activeTaskRef.current = task;
+        viewer.setDocument(document);
+        linkService.setDocument(document);
+        setDocumentProxy(document);
+        setPages(document.numPages);
+        setError('');
+        if (previousTask && previousTask !== task) void previousTask.destroy();
+
+        const nextOutline = (await document.getOutline()) ?? [];
+        if (!cancelled) setOutline(nextOutline);
+      })
+      .catch((cause) => {
+        if (cancelled || isAbortError(cause)) return;
+        viewerElement.style.visibility = '';
+        setError(cause instanceof Error ? cause.message : 'Unable to load PDF');
+      });
+
+    return () => {
+      cancelled = true;
+      if (activeTaskRef.current !== task) void task.destroy();
+    };
+  }, [url]);
 
   useEffect(() => {
     const manager = highlightManagerRef.current;
     manager?.clearSource();
-    if (forwardLocation) manager?.showSource(forwardLocation);
+    if (forwardLocation) {
+      window.getSelection()?.removeAllRanges();
+      manager?.showSource(forwardLocation);
+    }
     return () => manager?.clearSource();
   }, [forwardLocation]);
   useEffect(() => {
@@ -250,6 +311,7 @@ export function PdfViewer({
       pageView.viewport,
     );
     onInverse(point.page, point.x, point.y);
+    window.requestAnimationFrame(() => window.getSelection()?.removeAllRanges());
   };
 
   return (
@@ -318,15 +380,17 @@ export function PdfViewer({
         <IconButton label="Next PDF match" disabled={!query} onClick={() => find(false)}>
           <ChevronDown size={16} />
         </IconButton>
-        <span className="badge pdf-find-count" role="status">
-          {findState === 'pending'
-            ? '…'
-            : findState === 'not-found'
-              ? 'No matches'
-              : findCount.total
-                ? `${findCount.current}/${findCount.total}`
-                : '—'}
-        </span>
+        {query && (
+          <span className="badge pdf-find-count" role="status">
+            {findState === 'pending'
+              ? '…'
+              : findState === 'not-found'
+                ? 'No matches'
+                : findCount.total
+                  ? `${findCount.current}/${findCount.total}`
+                  : '—'}
+          </span>
+        )}
         <IconButton label="Find in PDF" onClick={() => find(false, '')}>
           <FileSearch size={16} />
         </IconButton>
@@ -427,6 +491,9 @@ export function PdfViewer({
           ref={containerRef}
           tabIndex={0}
           onDoubleClick={inverse}
+          onPointerDown={(event) => {
+            if (!(event.metaKey || event.ctrlKey)) highlightManagerRef.current?.clearSource();
+          }}
           aria-label="PDF document. Control or Command double-click for inverse search."
           hidden={Boolean(error)}
         >
@@ -518,23 +585,23 @@ function isAbortError(cause: unknown) {
   );
 }
 
-function readPdfState(key: string): { page: number; scale: string } | null {
+function defaultPdfViewport(): PdfViewportState {
+  return { page: 1, scale: 'page-width', anchor: { kind: 'page', x: 0, y: 0 } };
+}
+
+function readPdfState(key: string): PdfViewportState | null {
   try {
     const value: unknown = JSON.parse(localStorage.getItem(`pdf-state:${key}`) ?? 'null');
-    if (typeof value !== 'object' || value === null) return null;
-    const state = value as { page?: unknown; scale?: unknown };
-    return Number.isInteger(state.page) &&
-      typeof state.page === 'number' &&
-      state.page > 0 &&
-      typeof state.scale === 'string' &&
-      state.scale.length <= 40
-      ? { page: state.page, scale: state.scale }
-      : null;
+    return parsePdfViewportState(value);
   } catch {
     return null;
   }
 }
 
-function writePdfState(key: string, value: { page: number; scale: string }) {
-  localStorage.setItem(`pdf-state:${key}`, JSON.stringify(value));
+function writePdfState(key: string, value: PdfViewportState) {
+  try {
+    localStorage.setItem(`pdf-state:${key}`, JSON.stringify(value));
+  } catch {
+    // Storage can be unavailable or full; viewport preservation still works in memory.
+  }
 }

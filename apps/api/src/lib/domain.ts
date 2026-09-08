@@ -217,6 +217,20 @@ export async function createCheckpoint(
   projectId: string,
   reason: 'periodic' | 'compile' | 'import' | 'restore',
 ) {
+  const manifest = await acceptedCheckpointManifest(db, projectId);
+  const [project] = await db.select().from(projects).where(eq(projects.id, projectId)).limit(1);
+  if (!project) throw notFound('Project not found');
+  const [checkpoint] = await db
+    .insert(checkpoints)
+    .values({ projectId, sourceRevision: project.sourceRevision, reason, manifest })
+    .returning();
+  return checkpoint!;
+}
+
+export async function acceptedCheckpointManifest(
+  db: Database | DatabaseTransaction,
+  projectId: string,
+) {
   const projectEntries = await db
     .select()
     .from(entries)
@@ -237,7 +251,7 @@ export async function createCheckpoint(
     : [];
   const versionMap = new Map(versions.map(({ version, blob }) => [version.id, { version, blob }]));
   const paths = buildEntryPaths(projectEntries);
-  const manifest: CheckpointManifestEntry[] = files.map((entry) => {
+  return files.map((entry): CheckpointManifestEntry => {
     const pair = versionMap.get(entry.currentVersionId!);
     if (!pair) throw new Error(`Missing current version for ${entry.id}`);
     return {
@@ -250,13 +264,6 @@ export async function createCheckpoint(
       mimeType: entry.mimeType,
     };
   });
-  const [project] = await db.select().from(projects).where(eq(projects.id, projectId)).limit(1);
-  if (!project) throw notFound('Project not found');
-  const [checkpoint] = await db
-    .insert(checkpoints)
-    .values({ projectId, sourceRevision: project.sourceRevision, reason, manifest })
-    .returning();
-  return checkpoint!;
 }
 
 export async function getFileWithBlob(db: Database, projectId: string, entryId: string) {

@@ -75,7 +75,7 @@ export class TexLabClient {
   private requestId = 0;
   private pending = new Map<number | string, Pending>();
   private opened = new Set<string>();
-  private desired = new Map<string, Monaco.editor.ITextModel>();
+  private desired = new Map<string, { model: Monaco.editor.ITextModel; text: string }>();
   private disposables: Monaco.IDisposable[] = [];
   private ready = false;
   private disposed = false;
@@ -141,7 +141,7 @@ export class TexLabClient {
           this.providersRegistered = true;
         }
         this.opened.clear();
-        for (const model of this.desired.values()) this.open(model);
+        for (const { model, text } of this.desired.values()) this.open(model, text);
       } catch {
         this.onStatus('reconnecting');
         this.socket?.close();
@@ -178,10 +178,10 @@ export class TexLabClient {
     this.socket?.close();
   }
 
-  open(model: Monaco.editor.ITextModel) {
+  open(model: Monaco.editor.ITextModel, text = model.getValue()) {
     if (model.getLanguageId() !== 'latex' || model.uri.scheme !== 'file') return;
     const uri = model.uri.toString();
-    this.desired.set(uri, model);
+    this.desired.set(uri, { model, text });
     if (!this.ready) return;
     if (this.opened.has(uri)) return;
     this.opened.add(uri);
@@ -190,7 +190,7 @@ export class TexLabClient {
         uri,
         languageId: 'latex',
         version: model.getVersionId(),
-        text: model.getValue(),
+        text,
       },
     });
   }
@@ -206,18 +206,29 @@ export class TexLabClient {
   }
 
   change(model: Monaco.editor.ITextModel) {
-    if (!this.ready || !this.opened.has(model.uri.toString())) return;
+    this.changeText(model, model.getValue());
+  }
+
+  changeText(model: Monaco.editor.ITextModel, text: string) {
+    const uri = model.uri.toString();
+    const desired = this.desired.get(uri);
+    if (desired) this.desired.set(uri, { model, text });
+    if (!this.ready || !this.opened.has(uri)) return;
     this.notify('textDocument/didChange', {
-      textDocument: { uri: model.uri.toString(), version: model.getVersionId() },
-      contentChanges: [{ text: model.getValue() }],
+      textDocument: { uri, version: model.getVersionId() },
+      contentChanges: [{ text }],
     });
   }
 
   save(model: Monaco.editor.ITextModel) {
+    this.saveText(model, model.getValue());
+  }
+
+  saveText(model: Monaco.editor.ITextModel, text: string) {
     if (this.ready && this.opened.has(model.uri.toString()))
       this.notify('textDocument/didSave', {
         textDocument: { uri: model.uri.toString() },
-        text: model.getValue(),
+        text,
       });
   }
 

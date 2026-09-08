@@ -5,8 +5,20 @@ import { Button } from '../components/Button';
 import { Logo } from '../components/Logo';
 import { authClient } from '../lib/auth';
 import { appPath } from '../lib/api';
+import { oauthAuthorizationQuery } from '../features/agent-proposals/oauthConsentQuery';
 
 type Mode = 'signin' | 'signup' | 'forgot' | 'reset';
+
+function localNext(search: URLSearchParams) {
+  const raw = search.get('next');
+  if (!raw) return null;
+  try {
+    const next = new URL(raw, window.location.origin);
+    return next.origin === window.location.origin ? next.href : null;
+  } catch {
+    return null;
+  }
+}
 
 export function AuthPage() {
   const navigate = useNavigate();
@@ -21,8 +33,30 @@ export function AuthPage() {
   const [message, setMessage] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
+  async function continueOAuth() {
+    const oauthQuery = oauthAuthorizationQuery(window.location.search);
+    if (!oauthQuery) return false;
+    const response = await fetch(appPath('/api/auth/oauth2/continue'), {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ postLogin: true, oauth_query: oauthQuery }),
+    });
+    const result = (await response.json()) as { url?: unknown; redirect_uri?: unknown };
+    if (!response.ok) throw new Error('Unable to continue agent authorization');
+    const destination = typeof result.url === 'string' ? result.url : result.redirect_uri;
+    if (typeof destination !== 'string')
+      throw new Error('Authorization continuation was incomplete');
+    window.location.assign(destination);
+    return true;
+  }
+
   useEffect(() => {
-    if (session) void navigate({ to: '/projects', search: {} });
+    if (!session) return;
+    const next = localNext(search);
+    if (next) window.location.assign(next);
+    else if (oauthAuthorizationQuery(window.location.search)) void continueOAuth();
+    else void navigate({ to: '/projects', search: {} });
   }, [session, navigate]);
   if (isPending)
     return (
@@ -41,7 +75,9 @@ export function AuthPage() {
       if (mode === 'signin') {
         const result = await authClient.signIn.email({ email, password });
         if (result.error) throw new Error(result.error.message);
-        await navigate({ to: '/projects', search: {} });
+        const next = localNext(search);
+        if (next) window.location.assign(next);
+        else if (!(await continueOAuth())) await navigate({ to: '/projects', search: {} });
       } else if (mode === 'signup') {
         if (password !== confirm) throw new Error('Passwords do not match');
         const result = await authClient.signUp.email({

@@ -18,7 +18,7 @@ import { notFound, quotaExceeded } from './errors.js';
 export const AIDAN_TEMPLATE_SEED_KEY =
   'detective-fierce/tex-template@ec40af3ef128d3950050e39d5a257aa6d8ff9aed';
 
-const defaultDocument = String.raw`\documentclass{article}
+export const defaultDocument = String.raw`\documentclass{article}
 \usepackage[T1]{fontenc}
 \usepackage{lmodern}
 \title{Untitled Document}

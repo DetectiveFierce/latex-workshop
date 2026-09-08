@@ -15,13 +15,70 @@ import {
   editHistoryNodeSchema,
   editHistoryResponseSchema,
 } from './edit-history.js';
+import {
+  activeAgentProposalResponseSchema,
+  agentClientMetadataSchema,
+  agentGrantsResponseSchema,
+  agentProposalFileResponseSchema,
+  agentProposalResponseSchema,
+  agentProposalSchema,
+  proposalBulkDecisionSchema,
+  proposalDecisionSchema,
+  putAgentConnectionGrantSchema,
+  putOwnerProposalFileSchema,
+  reviseAgentProposalHunkSchema,
+} from './agent-proposals.js';
 export * from './paths.js';
 export * from './text-merge.js';
 export * from './keyboard-shortcuts.js';
 export * from './pdf-sync.js';
 export * from './edit-history.js';
+export * from './agent-proposals.js';
+export * from './proposal-hunks.js';
 
 export const idSchema = z.uuid();
+export const checkpointManifestSourceSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('accepted'), versionId: idSchema }),
+  z.object({
+    kind: z.literal('proposal'),
+    proposalId: idSchema,
+    revision: z.number().int().nonnegative(),
+    contentHash: z.string().length(64),
+  }),
+]);
+const checkpointManifestEntryBaseSchema = z.object({
+  entryId: idSchema,
+  path: z.string().min(1),
+  blobHash: z.string().length(64),
+  objectKey: z.string().min(1),
+  size: z.number().int().nonnegative(),
+  mimeType: z.string().nullable(),
+});
+export const checkpointManifestEntrySchema = z.union([
+  checkpointManifestEntryBaseSchema.extend({
+    versionId: idSchema,
+    source: z.undefined().optional(),
+  }),
+  checkpointManifestEntryBaseSchema
+    .extend({
+      versionId: idSchema,
+      source: z.object({ kind: z.literal('accepted'), versionId: idSchema }),
+    })
+    .refine((entry) => entry.versionId === entry.source.versionId, {
+      message: 'Accepted manifest provenance must match its file version',
+    }),
+  checkpointManifestEntryBaseSchema.extend({
+    versionId: z.null(),
+    source: z.object({
+      kind: z.literal('proposal'),
+      proposalId: idSchema,
+      revision: z.number().int().nonnegative(),
+      contentHash: z.string().length(64),
+    }),
+  }),
+]);
+export const checkpointManifestSchema = z.array(checkpointManifestEntrySchema);
+export type CheckpointManifestEntry = z.infer<typeof checkpointManifestEntrySchema>;
 export const compilerEngineSchema = z.enum(['pdflatex', 'xelatex', 'lualatex']);
 export type CompilerEngine = z.infer<typeof compilerEngineSchema>;
 
@@ -136,7 +193,10 @@ export const compileJobSchema = z.object({
   sourceRevision: z.number().int(),
   engine: compilerEngineSchema,
   status: compileStatusSchema,
-  trigger: z.enum(['manual', 'auto']),
+  trigger: z.enum(['manual', 'auto', 'agent']),
+  target: z.enum(['accepted', 'proposal']).default('accepted'),
+  proposalId: idSchema.nullable().default(null),
+  proposalRevision: z.number().int().nonnegative().nullable().default(null),
   log: z.string(),
   diagnostics: z.array(diagnosticSchema),
   durationMs: z.number().int().nullable(),
@@ -150,7 +210,10 @@ export const checkpointSchema = z.object({
   id: idSchema,
   projectId: idSchema,
   sourceRevision: z.number().int(),
-  reason: z.enum(['periodic', 'compile', 'import', 'restore']),
+  reason: z.enum(['periodic', 'compile', 'import', 'restore', 'proposal']),
+  target: z.enum(['accepted', 'proposal']).default('accepted'),
+  proposalId: idSchema.nullable().default(null),
+  proposalRevision: z.number().int().nonnegative().nullable().default(null),
   createdAt: z.iso.datetime(),
 });
 export type Checkpoint = z.infer<typeof checkpointSchema>;
@@ -303,6 +366,18 @@ export function buildOpenApiDocument(serverUrl: string) {
     required: true,
     schema: { type: 'string' as const, format: 'uuid' },
   };
+  const proposalPath = {
+    name: 'proposalId',
+    in: 'path' as const,
+    required: true,
+    schema: { type: 'string' as const, format: 'uuid' },
+  };
+  const hunkPath = {
+    name: 'hunkId',
+    in: 'path' as const,
+    required: true,
+    schema: { type: 'string' as const, format: 'uuid' },
+  };
   return {
     openapi: '3.1.0' as const,
     info: {
@@ -320,6 +395,7 @@ export function buildOpenApiDocument(serverUrl: string) {
       'History',
       'Transfers',
       'Preferences',
+      'Agents',
     ].map((name) => ({ name })),
     paths: {
       '/api/v1/preferences/keyboard-shortcuts': {
@@ -708,6 +784,166 @@ export function buildOpenApiDocument(serverUrl: string) {
           responses: { 200: { description: 'ZIP archive' } },
         },
       },
+      '/api/v1/agent-connections': {
+        get: {
+          tags: ['Agents'],
+          summary: 'List OAuth agent connections and project grants',
+          responses: { 200: response('AgentGrantsResponse') },
+        },
+        delete: {
+          tags: ['Agents'],
+          summary: 'Revoke an agent connection, grants, and tokens',
+          parameters: [
+            {
+              name: 'clientId',
+              in: 'query' as const,
+              required: true,
+              schema: { type: 'string' as const },
+            },
+          ],
+          responses: { 204: response(undefined, 'Revoked') },
+        },
+      },
+      '/api/v1/agent-connections/grants': {
+        put: {
+          tags: ['Agents'],
+          summary: 'Replace project grants for an agent connection',
+          requestBody: body('PutAgentConnectionGrant'),
+          responses: { 200: response(undefined, 'Updated grants') },
+        },
+      },
+      '/api/v1/agent-connections/client': {
+        get: {
+          tags: ['Agents'],
+          summary: 'Resolve display metadata for a pending OAuth agent client',
+          parameters: [
+            {
+              name: 'clientId',
+              in: 'query' as const,
+              required: true,
+              schema: { type: 'string' as const },
+            },
+          ],
+          responses: { 200: response('AgentClientMetadata') },
+        },
+      },
+      '/api/v1/agent-connections/tokens': {
+        delete: {
+          tags: ['Agents'],
+          summary: 'Revoke access and refresh tokens for an agent connection',
+          parameters: [
+            {
+              name: 'clientId',
+              in: 'query' as const,
+              required: true,
+              schema: { type: 'string' as const },
+            },
+          ],
+          responses: { 204: response(undefined, 'Tokens revoked') },
+        },
+      },
+      '/api/v1/projects/{projectId}/proposals/active': {
+        get: {
+          tags: ['Agents'],
+          summary: 'Load the unresolved agent proposal for a project',
+          parameters: [projectPath],
+          responses: { 200: response('ActiveAgentProposalResponse') },
+        },
+      },
+      '/api/v1/projects/{projectId}/proposals/{proposalId}': {
+        get: {
+          tags: ['Agents'],
+          summary: 'Load a durable agent proposal by id',
+          parameters: [projectPath, proposalPath],
+          responses: { 200: response('AgentProposalResponse') },
+        },
+      },
+      '/api/v1/projects/{projectId}/proposals/{proposalId}/files': {
+        get: {
+          tags: ['Agents'],
+          summary: 'Read overlay base and proposed text for one path',
+          parameters: [
+            projectPath,
+            proposalPath,
+            {
+              name: 'path',
+              in: 'query' as const,
+              required: true,
+              schema: { type: 'string' as const },
+            },
+          ],
+          responses: { 200: response('AgentProposalFile') },
+        },
+        put: {
+          tags: ['Agents'],
+          summary: 'Replace overlay text for a draft addition without deciding',
+          parameters: [projectPath, proposalPath],
+          requestBody: body('PutOwnerProposalFile'),
+          responses: { 200: response('AgentProposalResponse') },
+        },
+      },
+      '/api/v1/projects/{projectId}/proposals/{proposalId}/hunks/{hunkId}': {
+        post: {
+          tags: ['Agents'],
+          summary: 'Revise a frozen addition without accepting or rejecting it',
+          parameters: [projectPath, proposalPath, hunkPath],
+          requestBody: body('ReviseAgentProposalHunk'),
+          responses: { 200: response('AgentProposalResponse') },
+        },
+      },
+      '/api/v1/projects/{projectId}/proposals/{proposalId}/finish': {
+        post: {
+          tags: ['Agents'],
+          summary: 'Freeze deterministic hunks for owner review',
+          parameters: [projectPath, proposalPath],
+          requestBody: body('ProposalFinish'),
+          responses: { 200: response('AgentProposalResponse') },
+        },
+      },
+      '/api/v1/projects/{projectId}/proposals/{proposalId}/decisions': {
+        post: {
+          tags: ['Agents'],
+          summary: 'Accept or reject one frozen hunk or structural item',
+          parameters: [projectPath, proposalPath],
+          requestBody: body('ProposalDecision'),
+          responses: { 200: response('AgentProposalResponse') },
+        },
+      },
+      '/api/v1/projects/{projectId}/proposals/{proposalId}/accept-remaining': {
+        post: {
+          tags: ['Agents'],
+          summary: 'Accept every remaining pending proposal item',
+          parameters: [projectPath, proposalPath],
+          requestBody: body('ProposalBulkDecision'),
+          responses: { 200: response('AgentProposalResponse') },
+        },
+      },
+      '/api/v1/projects/{projectId}/proposals/{proposalId}/reject-remaining': {
+        post: {
+          tags: ['Agents'],
+          summary: 'Reject remaining pending items without undoing accepted work',
+          parameters: [projectPath, proposalPath],
+          requestBody: body('ProposalBulkDecision'),
+          responses: { 200: response('AgentProposalResponse') },
+        },
+      },
+      '/api/v1/projects/{projectId}/proposals/{proposalId}/compile': {
+        post: {
+          tags: ['Agents'],
+          summary: 'Queue a proposal-target compilation for the current revision',
+          parameters: [projectPath, proposalPath],
+          requestBody: body('ProposalFinish'),
+          responses: { 202: response('AgentProposalResponse') },
+        },
+      },
+      '/api/v1/projects/{projectId}/proposal-events': {
+        get: {
+          tags: ['Agents'],
+          summary: 'Stream proposal revision events with SSE',
+          parameters: [projectPath],
+          responses: { 200: { description: 'text/event-stream' } },
+        },
+      },
     },
     components: {
       securitySchemes: {
@@ -767,6 +1003,22 @@ export function buildOpenApiDocument(serverUrl: string) {
         CompileList: schemaObject(z.object({ jobs: z.array(compileJobSchema) })),
         CheckpointResponse: schemaObject(z.object({ checkpoint: checkpointSchema })),
         CheckpointList: schemaObject(z.object({ checkpoints: z.array(checkpointSchema) })),
+        AgentProposal: schemaObject(agentProposalSchema),
+        AgentProposalResponse: schemaObject(agentProposalResponseSchema),
+        ActiveAgentProposalResponse: schemaObject(activeAgentProposalResponseSchema),
+        AgentGrantsResponse: schemaObject(agentGrantsResponseSchema),
+        AgentClientMetadata: schemaObject(agentClientMetadataSchema),
+        PutAgentConnectionGrant: schemaObject(putAgentConnectionGrantSchema),
+        AgentProposalFile: schemaObject(agentProposalFileResponseSchema),
+        PutOwnerProposalFile: schemaObject(putOwnerProposalFileSchema),
+        ReviseAgentProposalHunk: schemaObject(reviseAgentProposalHunkSchema),
+        ProposalDecision: schemaObject(proposalDecisionSchema),
+        ProposalBulkDecision: schemaObject(proposalBulkDecisionSchema),
+        ProposalFinish: schemaObject(
+          proposalBulkDecisionSchema.pick({ expectedProposalRevision: true }).extend({
+            idempotencyKey: z.uuid(),
+          }),
+        ),
       },
     },
   };

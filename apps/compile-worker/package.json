@@ -19,7 +19,8 @@
     "@latex-workshop/storage": "workspace:*",
     "bullmq": "6.3.1",
     "drizzle-orm": "0.45.2",
-    "ioredis": "5.7.0"
+    "ioredis": "5.7.0",
+    "zod": "4.3.6"
   },
   "devDependencies": {
     "tsx": "4.20.5"

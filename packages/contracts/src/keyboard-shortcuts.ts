@@ -59,8 +59,14 @@ const editor = (
 
 export const shortcutRegistry = [
   workspace('workspace.compile', 'Compile project', 'Ctrl+Enter', 'Meta+Enter'),
-  workspace('workspace.save', 'Save current file', 'Ctrl+KeyS', 'Meta+KeyS'),
+  workspace('workspace.save', 'Save and compile current file', 'Ctrl+KeyS', 'Meta+KeyS'),
   workspace('workspace.commandPalette', 'Open command palette', 'Ctrl+KeyK', 'Meta+KeyK'),
+  workspace(
+    'workspace.projectSearch',
+    'Search project files',
+    'Ctrl+Shift+KeyF',
+    'Meta+Shift+KeyF',
+  ),
   workspace(
     'workspace.keyboardShortcuts',
     'Open keyboard shortcuts',

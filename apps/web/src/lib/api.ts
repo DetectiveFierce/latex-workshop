@@ -92,4 +92,7 @@ export const queryKeys = {
   compiles: (id: string) => ['compiles', id] as const,
   checkpoints: (id: string) => ['checkpoints', id] as const,
   keyboardShortcuts: (userId: string) => ['keyboard-shortcuts', userId] as const,
+  agentProposal: (projectId: string) => ['agent-proposal', projectId] as const,
+  agentProposalFile: (projectId: string, proposalId?: string, path?: string | null) =>
+    ['agent-proposal-file', projectId, proposalId, path] as const,
 };

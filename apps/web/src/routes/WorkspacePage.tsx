@@ -16,18 +16,17 @@ import {
   File,
   FileImage,
   FilePlus2,
+  FileSearch,
   Folder,
   FolderInput,
   FolderOpen,
   FolderPlus,
   History,
-  Keyboard,
   LoaderCircle,
   PanelBottomClose,
   PanelBottomOpen,
   Pencil,
   Play,
-  Settings,
   Target,
   Trash2,
   Upload,
@@ -45,6 +44,7 @@ import type {
   ProjectEntry,
   ShortcutActionId,
   SourceSelection,
+  AgentProposalChange,
 } from '@latex-workshop/contracts';
 import { shortcutRegistry } from '@latex-workshop/contracts';
 import { Button, IconButton } from '../components/Button';
@@ -56,14 +56,32 @@ import {
   disposeEditorEntry,
   disposeProjectEditors,
   EditorPane,
+  type EditorViewportSnapshot,
   type SaveMetadata,
   type SaveState,
 } from '../features/editor/EditorPane';
 import type { TexLabStatus } from '../features/editor/lspClient';
 import { PdfViewer } from '../features/pdf/PdfViewer';
+import { currentPdfSyncResult, type CompilationPdfSyncResult } from '../features/pdf/pdfSyncState';
+import {
+  autoCompileTargetKey,
+  decideAutoCompile,
+  selectAutoCompileTarget,
+  type AutoCompileTarget,
+} from '../features/compile/autoCompileState';
+import { ProposalEditorDock } from '../features/agent-proposals/ProposalEditorDock';
+import { ProjectSearchDialog } from '../features/search/ProjectSearchDialog';
+import type { ProjectSearchResult, ProjectSearchSource } from '../features/search/projectSearch';
+import { useAgentProposal } from '../features/agent-proposals/useAgentProposal';
+import { canDiscardDraftChange } from '../features/agent-proposals/proposalActiveState';
+import {
+  ProjectSettingsControl,
+  type ProjectSettingsControlHandle,
+} from '../features/settings/ProjectSettingsControl';
 import { api, appPath, queryKeys } from '../lib/api';
 import { authClient } from '../lib/auth';
 import { prefersTouchWorkspace, TOUCH_WORKSPACE_MEDIA } from '../lib/layout';
+import { projectDocumentTitle } from '../lib/document-title';
 import { classNames, formatRelative, isTextFile } from '../lib/utils';
 import { useAppearance } from '../lib/appearance';
 import {
@@ -92,6 +110,7 @@ type HistoryOutboxMutation = {
   queuedAt?: number;
 };
 const historyCommitsEnabled = import.meta.env.VITE_EDIT_HISTORY_COMMITS !== 'false';
+const AUTO_COMPILE_IDLE_MS = 2_500;
 
 export default function WorkspacePage() {
   const { projectId } = useParams({ from: '/projects/$projectId' });
@@ -117,6 +136,8 @@ export default function WorkspacePage() {
     enabled: Boolean(session?.user),
     refetchInterval: 10_000,
   });
+  const [previewTarget, setPreviewTarget] = useState<'accepted' | 'proposal'>('proposal');
+  const [autoCompileOverride, setAutoCompileOverride] = useState<boolean | null>(null);
   const [openTabs, setOpenTabs] = useState<string[]>(initialPreferences.current.openTabs);
   const [selectedId, setSelectedId] = useState<string | null>(
     initialPreferences.current.selectedId,
@@ -130,7 +151,7 @@ export default function WorkspacePage() {
   const [historyOpen, setHistoryOpen] = useState(false);
   const [editHistoryOpen, setEditHistoryOpen] = useState(false);
   const [editHistories, setEditHistories] = useState<Record<string, EditHistoryResponse>>({});
-  const [settingsOpen, setSettingsOpen] = useState(false);
+  const projectSettingsRef = useRef<ProjectSettingsControlHandle>(null);
   const [accountSettings, setAccountSettings] = useState<'account' | 'keyboard-shortcuts' | null>(
     null,
   );
@@ -139,13 +160,17 @@ export default function WorkspacePage() {
     local: string;
     server: FileContent;
   } | null>(null);
-  const [forward, setForward] = useState<PdfSyncResult | null>(null);
+  const [forward, setForward] = useState<CompilationPdfSyncResult | null>(null);
   const [pdfPageHint, setPdfPageHint] = useState<number | null>(null);
   const [saveStates, setSaveStates] = useState<Record<string, SaveState>>({});
   const [navigation, setNavigation] = useState<{
     line: number;
     token: number;
     selections?: EditorSelectionSnapshot;
+  } | null>(null);
+  const [viewportRestore, setViewportRestore] = useState<{
+    snapshot: EditorViewportSnapshot;
+    token: number;
   } | null>(null);
   const [mobilePanel, setMobilePanel] = useState<'files' | 'editor' | 'preview'>(
     initialPreferences.current.mobilePanel,
@@ -154,6 +179,11 @@ export default function WorkspacePage() {
   const [previewVisible, setPreviewVisible] = useState(initialPreferences.current.previewVisible);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [paletteQuery, setPaletteQuery] = useState('');
+  const [projectSearchOpen, setProjectSearchOpen] = useState(false);
+  const [projectSearchQuery, setProjectSearchQuery] = useState('');
+  const [projectSearchSources, setProjectSearchSources] = useState<ProjectSearchSource[]>([]);
+  const [projectSearchLoading, setProjectSearchLoading] = useState(false);
+  const [projectSearchFailedFiles, setProjectSearchFailedFiles] = useState(0);
   const [treeWidth, setTreeWidth] = useState(initialPreferences.current.treeWidth);
   const [editorWidth, setEditorWidth] = useState(initialPreferences.current.editorWidth);
   const [toast, setToast] = useState<ToastState | null>(null);
@@ -166,12 +196,20 @@ export default function WorkspacePage() {
   const [entryDialogError, setEntryDialogError] = useState<string | null>(null);
   const [entryDialogPending, setEntryDialogPending] = useState(false);
   const [touchLayout, setTouchLayout] = useState(() => prefersTouchWorkspace());
+  const [proposalOpenPath, setProposalOpenPath] = useState<string | null>(null);
   const saveCurrentRef = useRef<(() => Promise<void>) | null>(null);
   const focusEditorRef = useRef<(() => void) | null>(null);
+  const captureViewportRef = useRef<(() => EditorViewportSnapshot | null) | null>(null);
+  const pendingViewportRef = useRef<EditorViewportSnapshot | null>(null);
   const editorShortcutRef = useRef<((action: ShortcutActionId) => void) | null>(null);
   const pendingChordRef = useRef<{ sequences: string[]; timer: number } | null>(null);
+  const projectSearchRequestRef = useRef(0);
   const uploadRef = useRef<HTMLInputElement>(null);
   const autoCompileTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const autoCompileTarget = useRef<AutoCompileTarget | null>(null);
+  const autoCompileActivityAt = useRef(0);
+  const autoCompileAttempted = useRef<string | null>(null);
+  const autoCompileRequestPending = useRef(false);
   const manualCompile = useRef(false);
   const syncRequestRef = useRef<{ id: number; controller: AbortController } | null>(null);
   const editHistoriesRef = useRef<Record<string, EditHistoryResponse>>({});
@@ -195,9 +233,11 @@ export default function WorkspacePage() {
     [projectId],
   );
   const payload = projectQuery.data;
+  const autoCompileEnabled = autoCompileOverride ?? payload?.project.autoCompile ?? false;
   const entries = payload?.entries ?? [];
   const paths = useMemo(() => buildPaths(entries), [entries]);
   const selected = entries.find((entry) => entry.id === selectedId) ?? null;
+  const selectedPath = selected ? (paths.get(selected.id) ?? null) : proposalOpenPath;
   const selectedTextContent =
     selected?.kind === 'file' && isTextFile(selected.name, selected.mimeType)
       ? contents[selected.id]
@@ -205,9 +245,84 @@ export default function WorkspacePage() {
   useEffect(() => {
     if (selectedTextContent && selected) setActiveEditorId(selected.id);
   }, [selected, selectedTextContent]);
+  const agentProposal = useAgentProposal({
+    projectId,
+    openPath: selectedPath,
+    saveState: selectedId ? saveStates[selectedId] : undefined,
+    flushEditor: () => saveCurrentRef.current?.() ?? Promise.resolve(),
+    onAcceptedHeadChanged: async () => {
+      const preservedPath = selectedPath;
+      pendingViewportRef.current = captureViewportRef.current?.() ?? null;
+      disposeProjectEditors(projectId);
+      setContents({});
+      editHistoriesRef.current = {};
+      setEditHistories({});
+      const refreshedPayload = (await projectQuery.refetch()).data;
+      const refreshedEntries = refreshedPayload?.entries ?? [];
+      const refreshedPaths = buildPaths(refreshedEntries);
+      const selectedEntry =
+        refreshedEntries.find((entry) => refreshedPaths.get(entry.id) === preservedPath) ??
+        refreshedEntries.find((entry) => entry.id === selectedId);
+      if (
+        selectedEntry?.kind === 'file' &&
+        isTextFile(selectedEntry.name, selectedEntry.mimeType)
+      ) {
+        try {
+          const data = await api<FileContent & { hash: string }>(
+            `/api/v1/projects/${projectId}/entries/${selectedEntry.id}/content`,
+          );
+          setContents({
+            [selectedEntry.id]: { content: data.content, version: data.version },
+          });
+          setSelectedId(selectedEntry.id);
+          setActiveEditorId(selectedEntry.id);
+          setProposalOpenPath(refreshedPaths.get(selectedEntry.id) ?? null);
+          setOpenTabs((tabs) => [
+            ...tabs.filter(
+              (id) =>
+                id !== activeEditorId && id !== selectedEntry.id && !id.startsWith('proposal:'),
+            ),
+            selectedEntry.id,
+          ]);
+          const pendingViewport = pendingViewportRef.current;
+          if (pendingViewport)
+            setViewportRestore((current) => ({
+              snapshot: pendingViewport,
+              token: (current?.token ?? 0) + 1,
+            }));
+          await loadEditHistory(selectedEntry.id, true);
+        } catch {
+          setSelectedId(null);
+        }
+      }
+      pendingViewportRef.current = null;
+    },
+  });
+  const activeProposal = agentProposal.proposal;
+  const acceptedCompile =
+    compileQuery.data?.jobs.find(
+      (job) => job.status === 'succeeded' && job.target === 'accepted',
+    ) ??
+    (payload?.latestCompile?.status === 'succeeded' && payload.latestCompile.target === 'accepted'
+      ? payload.latestCompile
+      : null);
+  const proposalCompile = activeProposal
+    ? (compileQuery.data?.jobs.find(
+        (job) =>
+          job.status === 'succeeded' &&
+          job.target === 'proposal' &&
+          job.proposalId === activeProposal.id,
+      ) ?? null)
+    : null;
+  const latestProposalCompile = activeProposal
+    ? (compileQuery.data?.jobs.find(
+        (job) => job.target === 'proposal' && job.proposalId === activeProposal.id,
+      ) ?? null)
+    : null;
   const successfulCompile =
-    compileQuery.data?.jobs.find((job) => job.status === 'succeeded') ??
-    (payload?.latestCompile?.status === 'succeeded' ? payload.latestCompile : null);
+    previewTarget === 'proposal' && activeProposal
+      ? (proposalCompile ?? acceptedCompile)
+      : acceptedCompile;
   const activeCompile =
     compileQuery.data?.jobs.find((job) => job.status === 'queued' || job.status === 'running') ??
     null;
@@ -215,11 +330,18 @@ export default function WorkspacePage() {
 
   useEffect(() => {
     if (!payload) return;
-    document.title = `${selected?.name ?? payload.project.name} — Editor | LaTeX Workshop`;
+    const mode = touchLayout
+      ? mobilePanel === 'preview'
+        ? 'pdf'
+        : 'editor'
+      : previewVisible
+        ? 'combined'
+        : 'editor';
+    document.title = projectDocumentTitle(payload.project.name, mode);
     return () => {
       document.title = 'LaTeX Workshop';
     };
-  }, [payload, selected?.name]);
+  }, [mobilePanel, payload, previewVisible, touchLayout]);
 
   useEffect(() => {
     if (!payload) return;
@@ -243,9 +365,10 @@ export default function WorkspacePage() {
     const validFiles = new Set(
       entries.filter((entry) => entry.kind === 'file').map(({ id }) => id),
     );
+    for (const file of agentProposal.virtualFiles) validFiles.add(`proposal:${file.changeId}`);
     setOpenTabs((tabs) => tabs.filter((id) => validFiles.has(id)));
-    if (selectedId && !entries.some((entry) => entry.id === selectedId)) setSelectedId(null);
-  }, [entries, payload, selectedId]);
+    if (selectedId && !validFiles.has(selectedId)) setSelectedId(null);
+  }, [agentProposal.virtualFiles, entries, payload, selectedId]);
 
   useEffect(() => {
     localStorage.setItem(
@@ -285,6 +408,8 @@ export default function WorkspacePage() {
       };
       if (data.type === 'status') {
         void queryClient.invalidateQueries({ queryKey: queryKeys.compiles(projectId) });
+        if (data.job && ['succeeded', 'failed', 'cancelled'].includes(data.job.status))
+          armAutoCompile();
         if (data.job?.status === 'succeeded')
           setToast({ id: Date.now(), tone: 'success', message: 'PDF compiled successfully' });
         if (data.job?.status === 'failed')
@@ -362,6 +487,12 @@ export default function WorkspacePage() {
     const nextId = openTabs[(current + direction + openTabs.length) % openTabs.length];
     const next = entries.find((entry) => entry.id === nextId);
     if (next) void openEntry(next);
+    else {
+      const virtual = agentProposal.virtualFiles.find(
+        (file) => `proposal:${file.changeId}` === nextId,
+      );
+      if (virtual) openProposalPath(virtual.path);
+    }
   }
 
   function closeTab(id: string) {
@@ -373,6 +504,13 @@ export default function WorkspacePage() {
         setSelectedId(adjacent);
         const entry = entries.find((item) => item.id === adjacent);
         if (entry) void openEntry(entry);
+        else {
+          const virtual = agentProposal.virtualFiles.find(
+            (file) => `proposal:${file.changeId}` === adjacent,
+          );
+          if (virtual) openProposalPath(virtual.path);
+          else setProposalOpenPath(null);
+        }
       }
       return nextTabs;
     });
@@ -383,14 +521,17 @@ export default function WorkspacePage() {
     if (definition?.scope === 'editor') return editorShortcutRef.current?.(action);
     switch (action) {
       case 'workspace.compile':
-        compile.mutate('manual');
+        requestManualCompile();
         break;
       case 'workspace.save':
-        void saveCurrentRef.current?.();
+        requestManualCompile();
         break;
       case 'workspace.commandPalette':
         setPaletteQuery('');
         setPaletteOpen(true);
+        break;
+      case 'workspace.projectSearch':
+        void openProjectSearch();
         break;
       case 'workspace.keyboardShortcuts':
         setAccountSettings('keyboard-shortcuts');
@@ -432,7 +573,7 @@ export default function WorkspacePage() {
         void forwardSearch();
         break;
       case 'workspace.projectSettings':
-        setSettingsOpen(true);
+        projectSettingsRef.current?.open();
         break;
       case 'workspace.createFile':
         void createEntry('file');
@@ -443,8 +584,25 @@ export default function WorkspacePage() {
     }
   }
 
+  function openProposalPath(path: string) {
+    const entry = entries.find((item) => paths.get(item.id) === path);
+    if (entry) {
+      void openEntry(entry);
+      return;
+    }
+    const virtual = agentProposal.virtualFiles.find((file) => file.path === path);
+    if (!virtual) return;
+    const id = `proposal:${virtual.changeId}`;
+    setSelectedId(id);
+    setProposalOpenPath(path);
+    setActiveEditorId(id);
+    setOpenTabs((tabs) => (tabs.includes(id) ? tabs : [...tabs, id]));
+    setContents((value) => (value[id] ? value : { ...value, [id]: { content: '', version: 0 } }));
+  }
+
   async function openEntry(entry: ProjectEntry) {
     setSelectedId(entry.id);
+    setProposalOpenPath(paths.get(entry.id) ?? null);
     if (entry.kind !== 'file') return;
     setOpenTabs((tabs) => (tabs.includes(entry.id) ? tabs : [...tabs, entry.id]));
     if (!isTextFile(entry.name, entry.mimeType)) return;
@@ -465,6 +623,72 @@ export default function WorkspacePage() {
         message: error instanceof Error ? error.message : 'Unable to open file',
       });
     }
+  }
+
+  async function openProjectSearch() {
+    const requestId = ++projectSearchRequestRef.current;
+    setProjectSearchQuery('');
+    setProjectSearchOpen(true);
+    setProjectSearchLoading(true);
+    setProjectSearchFailedFiles(0);
+    const sourceEntries = entries.filter(
+      (entry) => entry.kind === 'file' && isTextFile(entry.name, entry.mimeType),
+    );
+    const loaded: ProjectSearchSource[] = [];
+    let failed = 0;
+    const queue = [...sourceEntries];
+    const workers = Array.from({ length: Math.min(6, queue.length) }, async () => {
+      while (queue.length) {
+        const entry = queue.shift();
+        if (!entry) return;
+        try {
+          const cached = contents[entry.id];
+          const data =
+            cached ??
+            (await api<FileContent & { hash: string }>(
+              `/api/v1/projects/${projectId}/entries/${entry.id}/content`,
+            ));
+          loaded.push({
+            entryId: entry.id,
+            path: paths.get(entry.id) ?? entry.name,
+            content: data.content,
+          });
+        } catch {
+          failed += 1;
+        }
+      }
+    });
+    await Promise.all(workers);
+    if (projectSearchRequestRef.current !== requestId) return;
+    const order = new Map(sourceEntries.map((entry, index) => [entry.id, index]));
+    loaded.sort(
+      (left, right) =>
+        (order.get(left.entryId) ?? Number.MAX_SAFE_INTEGER) -
+        (order.get(right.entryId) ?? Number.MAX_SAFE_INTEGER),
+    );
+    setProjectSearchSources(loaded);
+    setProjectSearchFailedFiles(failed);
+    setProjectSearchLoading(false);
+  }
+
+  async function openProjectSearchResult(result: ProjectSearchResult) {
+    const entry = entries.find((item) => item.id === result.entryId);
+    if (!entry) return;
+    setProjectSearchOpen(false);
+    setMobilePanel('editor');
+    await openEntry(entry);
+    setNavigation((current) => ({
+      line: result.line,
+      token: (current?.token ?? 0) + 1,
+      selections: [
+        {
+          startLine: result.line,
+          startColumn: result.column,
+          endLine: result.line,
+          endColumn: result.endColumn,
+        },
+      ],
+    }));
   }
 
   function updateEditHistory(entryId: string, history: EditHistoryResponse) {
@@ -502,6 +726,9 @@ export default function WorkspacePage() {
     baseVersion: number,
     metadata: SaveMetadata,
   ) {
+    if (entryId.startsWith('proposal:')) {
+      return { version: 0, content: value, merged: false, unchanged: true };
+    }
     if (!historyCommitsEnabled) {
       const result = await api<{
         entry: ProjectEntry;
@@ -531,10 +758,11 @@ export default function WorkspacePage() {
             }
           : old,
       );
-      if (payload?.project.autoCompile && !result.unchanged && !manualCompile.current) {
-        if (autoCompileTimer.current) clearTimeout(autoCompileTimer.current);
-        autoCompileTimer.current = setTimeout(() => compile.mutate('auto'), 1_200);
-      }
+      if (autoCompileEnabled && !result.unchanged && !manualCompile.current)
+        noteAutoCompileActivity({
+          target: 'accepted',
+          revision: (payload?.project.sourceRevision ?? 0) + 1,
+        });
       return {
         version: result.entry.version,
         content: result.content,
@@ -636,10 +864,11 @@ export default function WorkspacePage() {
           }
         : old,
     );
-    if (payload?.project.autoCompile && changedCommits > 0 && !manualCompile.current) {
-      if (autoCompileTimer.current) clearTimeout(autoCompileTimer.current);
-      autoCompileTimer.current = setTimeout(() => compile.mutate('auto'), 1_200);
-    }
+    if (autoCompileEnabled && changedCommits > 0 && !manualCompile.current)
+      noteAutoCompileActivity({
+        target: 'accepted',
+        revision: (payload?.project.sourceRevision ?? 0) + changedCommits,
+      });
     return {
       version: finalResult.version,
       content: finalResult.content,
@@ -701,25 +930,189 @@ export default function WorkspacePage() {
   }
 
   const compile = useMutation({
-    mutationFn: async (trigger: 'manual' | 'auto') => {
+    mutationFn: async ({
+      trigger,
+      target,
+    }: {
+      trigger: 'manual' | 'auto';
+      target: AutoCompileTarget;
+    }) => {
       if (trigger === 'manual') {
         if (autoCompileTimer.current) clearTimeout(autoCompileTimer.current);
+        autoCompileTarget.current = null;
         manualCompile.current = true;
         try {
-          await saveCurrentRef.current?.();
+          if (target.target === 'proposal') await agentProposal.flushPending();
+          else await saveCurrentRef.current?.();
         } finally {
           manualCompile.current = false;
         }
+      }
+      if (target.target === 'proposal') {
+        const cached = queryClient.getQueryData<{ proposal: typeof activeProposal }>(
+          queryKeys.agentProposal(projectId),
+        )?.proposal;
+        if (!cached || cached.id !== target.proposalId)
+          throw new Error('Proposal is no longer active');
+        return api<{ proposal: typeof cached }>(
+          `/api/v1/projects/${projectId}/proposals/${cached.id}/compile`,
+          {
+            method: 'POST',
+            body: JSON.stringify({
+              expectedProposalRevision: cached.revision,
+              idempotencyKey: crypto.randomUUID(),
+            }),
+          },
+        ).then(() => ({ job: null }));
       }
       return api<{ job: CompileWithArtifact }>(`/api/v1/projects/${projectId}/compilations`, {
         method: 'POST',
         body: JSON.stringify({ trigger }),
       });
     },
-    onSuccess: () =>
-      void queryClient.invalidateQueries({ queryKey: queryKeys.compiles(projectId) }),
-    onError: (error) => setToast({ id: Date.now(), tone: 'error', message: error.message }),
+    onSuccess: (data, variables) => {
+      if (variables.trigger === 'auto') {
+        const requestedKey = autoCompileTargetKey(variables.target);
+        const covered =
+          variables.target.target === 'proposal' ||
+          (data.job?.target === 'accepted' && data.job.sourceRevision >= variables.target.revision);
+        if (covered) {
+          autoCompileAttempted.current = requestedKey;
+        }
+        if (
+          covered &&
+          autoCompileTarget.current &&
+          requestedKey === autoCompileTargetKey(autoCompileTarget.current)
+        )
+          autoCompileTarget.current = null;
+      }
+      void queryClient.invalidateQueries({ queryKey: queryKeys.compiles(projectId) });
+    },
+    onError: (error, variables) => {
+      if (variables.trigger === 'auto') {
+        autoCompileAttempted.current = autoCompileTargetKey(variables.target);
+        autoCompileTarget.current = null;
+      }
+      setToast({ id: Date.now(), tone: 'error', message: error.message });
+    },
+    onSettled: () => {
+      autoCompileRequestPending.current = false;
+    },
   });
+
+  function currentCompileTarget(): AutoCompileTarget {
+    if (previewTarget === 'proposal' && activeProposal)
+      return {
+        target: 'proposal',
+        proposalId: activeProposal.id,
+        revision: activeProposal.revision,
+      };
+    return { target: 'accepted', revision: payload?.project.sourceRevision ?? 0 };
+  }
+
+  function requestManualCompile() {
+    compile.mutate({ trigger: 'manual', target: currentCompileTarget() });
+  }
+
+  async function setAutoCompile(enabled: boolean) {
+    const previous = autoCompileEnabled;
+    setAutoCompileOverride(enabled);
+    queryClient.setQueryData<ProjectPayload>(queryKeys.project(projectId), (current) =>
+      current ? { ...current, project: { ...current.project, autoCompile: enabled } } : current,
+    );
+    try {
+      await updateProject(projectId, { autoCompile: enabled }, queryClient);
+      setAutoCompileOverride(null);
+    } catch (cause) {
+      queryClient.setQueryData<ProjectPayload>(queryKeys.project(projectId), (current) =>
+        current ? { ...current, project: { ...current.project, autoCompile: previous } } : current,
+      );
+      setAutoCompileOverride(null);
+      setToast({
+        id: Date.now(),
+        tone: 'error',
+        message: cause instanceof Error ? cause.message : 'Unable to update Auto compile',
+      });
+    }
+  }
+
+  function noteAutoCompileActivity(target = autoCompileTarget.current) {
+    if (!autoCompileEnabled || !target) return;
+    const previous = autoCompileTarget.current;
+    if (!previous || autoCompileTargetKey(previous) !== autoCompileTargetKey(target))
+      autoCompileAttempted.current = null;
+    autoCompileTarget.current = target;
+    autoCompileActivityAt.current = Date.now();
+    armAutoCompile();
+  }
+
+  function armAutoCompile(minimumDelay = AUTO_COMPILE_IDLE_MS) {
+    if (autoCompileTimer.current) clearTimeout(autoCompileTimer.current);
+    if (!autoCompileTarget.current || !autoCompileEnabled) return;
+    const remaining = Math.max(
+      minimumDelay,
+      AUTO_COMPILE_IDLE_MS - (Date.now() - autoCompileActivityAt.current),
+    );
+    autoCompileTimer.current = setTimeout(runAutoCompile, remaining);
+  }
+
+  function runAutoCompile() {
+    autoCompileTimer.current = null;
+    const target = autoCompileTarget.current;
+    if (!target || !autoCompileEnabled || autoCompileRequestPending.current) return;
+    const jobs =
+      queryClient.getQueryData<{ jobs: CompileWithArtifact[] }>(queryKeys.compiles(projectId))
+        ?.jobs ?? [];
+    const decision = decideAutoCompile(target, jobs, autoCompileAttempted.current);
+    if (decision === 'covered') {
+      autoCompileTarget.current = null;
+      return;
+    }
+    if (decision === 'wait') return;
+    autoCompileRequestPending.current = true;
+    compile.mutate({ trigger: 'auto', target });
+  }
+
+  useEffect(() => {
+    if (!payload || !autoCompileEnabled) {
+      if (autoCompileTimer.current) clearTimeout(autoCompileTimer.current);
+      autoCompileTarget.current = null;
+      return;
+    }
+    const target = selectAutoCompileTarget({
+      preferredTarget: previewTarget,
+      acceptedRevision: payload.project.sourceRevision,
+      acceptedCompiledRevision: acceptedCompile?.sourceRevision ?? null,
+      proposal: activeProposal
+        ? {
+            id: activeProposal.id,
+            revision: activeProposal.revision,
+            compiledRevision: proposalCompile?.proposalRevision ?? null,
+          }
+        : null,
+    });
+    if (target) noteAutoCompileActivity(target);
+    else {
+      if (autoCompileTimer.current) clearTimeout(autoCompileTimer.current);
+      autoCompileTarget.current = null;
+    }
+  }, [
+    acceptedCompile?.sourceRevision,
+    activeProposal?.id,
+    activeProposal?.revision,
+    autoCompileEnabled,
+    payload?.project.sourceRevision,
+    previewTarget,
+    proposalCompile?.proposalRevision,
+  ]);
+
+  useEffect(() => {
+    if (!autoCompileTarget.current) return;
+    const hasActive = compileQuery.data?.jobs.some(
+      (job) => job.status === 'queued' || job.status === 'running',
+    );
+    if (!hasActive) armAutoCompile(0);
+  }, [compileQuery.data?.jobs]);
 
   const mutateEntry = useMutation({
     mutationFn: ({ id, method, body }: { id?: string; method: string; body?: unknown }) =>
@@ -882,8 +1275,18 @@ export default function WorkspacePage() {
   }
 
   async function forwardSearch(selection?: SourceSelection) {
-    if (!successfulCompile || !selected || !paths.get(selected.id)) return;
-    const currentLine = currentContent?.content.split('\n')[cursor.line - 1] ?? '';
+    const syncPath = selected ? paths.get(selected.id) : proposalOpenPath;
+    const syncContent = selected
+      ? currentContent
+      : activeEditorId
+        ? contents[activeEditorId]
+        : null;
+    if (!successfulCompile || !syncPath) return;
+    const syncText =
+      agentProposal.fileModel?.path === syncPath
+        ? agentProposal.fileModel.buffer
+        : (syncContent?.content ?? '');
+    const currentLine = syncText.split('\n')[cursor.line - 1] ?? '';
     const sourceSelection = selection ?? {
       start: cursor,
       end: cursor,
@@ -904,15 +1307,23 @@ export default function WorkspacePage() {
           method: 'POST',
           signal: request.controller.signal,
           body: JSON.stringify({
-            path: paths.get(selected.id),
+            path: syncPath,
             selection: sourceSelection,
-            entryVersion: currentContent?.version ?? selected.version,
+            entryVersion: syncContent?.version ?? selected?.version ?? 0,
+            source:
+              successfulCompile.target === 'proposal'
+                ? {
+                    target: 'proposal',
+                    proposalId: successfulCompile.proposalId,
+                    proposalRevision: successfulCompile.proposalRevision,
+                  }
+                : { target: 'accepted' },
             ...(pdfPageHint ? { pageHint: pdfPageHint } : {}),
           }),
         },
       );
       if (syncRequestRef.current?.id !== request.id) return;
-      setForward(result);
+      setForward({ compilationId: successfulCompile.id, result });
       setPreviewVisible(true);
       setMobilePanel('preview');
     } catch (error) {
@@ -929,7 +1340,22 @@ export default function WorkspacePage() {
     try {
       const result = await api<{ path: string; line: number }>(
         `/api/v1/projects/${projectId}/compilations/${successfulCompile.id}/synctex/inverse`,
-        { method: 'POST', body: JSON.stringify({ page, x, y }) },
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            page,
+            x,
+            y,
+            source:
+              successfulCompile.target === 'proposal'
+                ? {
+                    target: 'proposal',
+                    proposalId: successfulCompile.proposalId,
+                    proposalRevision: successfulCompile.proposalRevision,
+                  }
+                : { target: 'accepted' },
+          }),
+        },
       );
       const target = entries.find(
         (entry) =>
@@ -937,6 +1363,10 @@ export default function WorkspacePage() {
       );
       if (target) {
         await openEntry(target);
+        setNavigation((old) => ({ line: result.line, token: (old?.token ?? 0) + 1 }));
+        setMobilePanel('editor');
+      } else if (agentProposal.virtualFiles.some((file) => file.path === result.path)) {
+        openProposalPath(result.path);
         setNavigation((old) => ({ line: result.line, token: (old?.token ?? 0) + 1 }));
         setMobilePanel('editor');
       }
@@ -1002,10 +1432,34 @@ export default function WorkspacePage() {
       </main>
     );
   const currentContent = selected ? contents[selected.id] : null;
-  const activeEditorEntry = entries.find((entry) => entry.id === activeEditorId);
-  const activeEditorContent = activeEditorId ? contents[activeEditorId] : undefined;
+  const virtualFile = agentProposal.virtualFiles.find(
+    (file) => `proposal:${file.changeId}` === selectedId,
+  );
+  const virtualEntry: ProjectEntry | null =
+    !selected && virtualFile
+      ? {
+          id: `proposal:${virtualFile.changeId}`,
+          projectId,
+          parentId: null,
+          name: virtualFile.name,
+          kind: 'file',
+          mimeType: 'text/plain',
+          size: 0,
+          version: 0,
+          createdAt: new Date(0).toISOString(),
+          updatedAt: new Date(0).toISOString(),
+        }
+      : null;
+  const activeEditorEntry = entries.find((entry) => entry.id === activeEditorId) ?? virtualEntry;
+  const activeEditorContent = activeEditorId
+    ? contents[activeEditorId]
+    : virtualEntry
+      ? { content: '', version: 0 }
+      : undefined;
   const editorIsVisible = Boolean(
-    activeEditorEntry && activeEditorContent && selected?.id === activeEditorEntry.id,
+    activeEditorEntry &&
+      activeEditorContent &&
+      (selected?.id === activeEditorEntry.id || virtualEntry?.id === activeEditorEntry.id),
   );
   const previewUrl = successfulCompile
     ? appPath(`/api/v1/projects/${projectId}/compilations/${successfulCompile.id}/pdf`)
@@ -1029,10 +1483,8 @@ export default function WorkspacePage() {
         <label className="badge">
           <input
             type="checkbox"
-            checked={payload.project.autoCompile}
-            onChange={(event) =>
-              void updateProject(projectId, { autoCompile: event.target.checked }, queryClient)
-            }
+            checked={autoCompileEnabled}
+            onChange={(event) => void setAutoCompile(event.target.checked)}
           />{' '}
           Auto
         </label>
@@ -1049,17 +1501,23 @@ export default function WorkspacePage() {
             {activeCompile.status === 'queued' ? 'Queued' : 'Compiling'} <CircleStop size={15} />
           </Button>
         ) : (
-          <Button className="compile-button" onClick={() => compile.mutate('manual')}>
+          <Button className="compile-button" onClick={requestManualCompile}>
             <Play size={15} /> Compile
           </Button>
         )}
         <div className="workspace-toolbar-extras">
           <IconButton
             label="Forward search"
-            disabled={!successfulCompile || selected?.kind !== 'file'}
+            disabled={!successfulCompile || !selectedPath}
             onClick={() => void forwardSearch()}
           >
             <Target size={17} />
+          </IconButton>
+          <IconButton
+            label={`Search project${shortcuts['workspace.projectSearch'] ? ` (${displayShortcut(shortcuts['workspace.projectSearch'])})` : ''}`}
+            onClick={() => void openProjectSearch()}
+          >
+            <FileSearch size={17} />
           </IconButton>
           <IconButton
             label={`Command palette${shortcuts['workspace.commandPalette'] ? ` (${displayShortcut(shortcuts['workspace.commandPalette'])})` : ''}`}
@@ -1073,9 +1531,13 @@ export default function WorkspacePage() {
           <IconButton label="Version history" onClick={() => setHistoryOpen(true)}>
             <History size={17} />
           </IconButton>
-          <IconButton label="Project settings" onClick={() => setSettingsOpen(true)}>
-            <Settings size={17} />
-          </IconButton>
+          <ProjectSettingsControl
+            ref={projectSettingsRef}
+            project={payload.project}
+            entries={entries}
+            onSaved={() => void projectQuery.refetch()}
+            onOpenProfileSettings={() => setAccountSettings('account')}
+          />
           <AppearanceMenu />
         </div>
       </header>
@@ -1133,12 +1595,30 @@ export default function WorkspacePage() {
           <div className="file-tree">
             <FileTree
               entries={entries}
+              proposalChanges={activeProposal?.changes ?? []}
               selectedId={selectedId}
               onSelect={(entry) => void openEntry(entry)}
               onMove={(entryId, parentId) =>
                 mutateEntry.mutate({ id: entryId, method: 'PATCH', body: { parentId } })
               }
             />
+            {activeProposal?.changes
+              .filter((change) => !change.entryId && change.decision !== 'rejected')
+              .map((change) => (
+                <button
+                  type="button"
+                  className="tree-row proposal-added"
+                  key={change.id}
+                  onClick={() => {
+                    if (change.entryKind === 'file' && change.targetPath)
+                      openProposalPath(change.targetPath);
+                  }}
+                >
+                  {change.entryKind === 'folder' ? <Folder size={15} /> : <File size={15} />}
+                  <span>{change.targetPath}</span>
+                  <span className="badge proposal-tree-badge">added</span>
+                </button>
+              ))}
           </div>
           {selected && (
             <div className="file-actions">
@@ -1153,6 +1633,17 @@ export default function WorkspacePage() {
               </Button>
               <Button variant="ghost" onClick={deleteEntry}>
                 <Trash2 size={14} /> Delete
+              </Button>
+            </div>
+          )}
+          {virtualFile && activeProposal && canDiscardDraftChange(activeProposal.status) && (
+            <div className="file-actions">
+              <Button
+                variant="ghost"
+                disabled={agentProposal.busy}
+                onClick={() => void agentProposal.discardChange(virtualFile.changeId)}
+              >
+                <Trash2 size={14} /> Discard proposed file
               </Button>
             </div>
           )}
@@ -1175,13 +1666,35 @@ export default function WorkspacePage() {
               </IconButton>
             )}
             {openTabs.map((id) => {
-              const entry = entries.find((item) => item.id === id);
+              const proposalFile = agentProposal.virtualFiles.find(
+                (file) => `proposal:${file.changeId}` === id,
+              );
+              const entry =
+                entries.find((item) => item.id === id) ??
+                (proposalFile
+                  ? {
+                      id,
+                      projectId,
+                      parentId: null,
+                      name: proposalFile.name,
+                      kind: 'file' as const,
+                      mimeType: 'text/plain',
+                      size: 0,
+                      version: 0,
+                      createdAt: new Date(0).toISOString(),
+                      updatedAt: new Date(0).toISOString(),
+                    }
+                  : null);
               if (!entry) return null;
               return (
                 <button
                   key={id}
                   className={classNames('editor-tab', id === selectedId && 'active')}
-                  onClick={() => void openEntry(entry)}
+                  onClick={() => {
+                    if (entry.id.startsWith('proposal:') && proposalFile)
+                      openProposalPath(proposalFile.path);
+                    else void openEntry(entry);
+                  }}
                 >
                   <File size={13} />
                   <span>{entry.name}</span>
@@ -1235,19 +1748,62 @@ export default function WorkspacePage() {
                 <EditorPane
                   projectId={projectId}
                   entry={{ ...activeEditorEntry, version: activeEditorContent.version }}
-                  path={paths.get(activeEditorEntry.id)!}
+                  path={
+                    paths.get(activeEditorEntry.id) ?? proposalOpenPath ?? activeEditorEntry.name
+                  }
                   content={activeEditorContent.content}
-                  onChange={(entryId, content) =>
+                  proposalModel={agentProposal.overlayBlocked ? null : agentProposal.fileModel}
+                  lspEnabled={!activeEditorEntry.id.startsWith('proposal:')}
+                  proposalStatus={activeProposal?.status ?? 'draft'}
+                  selectedHunkId={agentProposal.selectedHunkId}
+                  onSelectHunk={agentProposal.setSelectedHunkId}
+                  onProposalEdit={(edit) => {
+                    setPreviewTarget('proposal');
+                    void agentProposal.persistEdit(edit);
+                  }}
+                  onDecideHunk={(hunkId, decision) => void agentProposal.decide(hunkId, decision)}
+                  proposalDock={
+                    activeProposal ? (
+                      <ProposalEditorDock
+                        status={activeProposal.status}
+                        currentAdded={agentProposal.totals.added}
+                        currentDeleted={agentProposal.totals.deleted}
+                        items={agentProposal.items}
+                        selectedId={agentProposal.selectedHunkId}
+                        expanded={agentProposal.dockExpanded}
+                        busy={agentProposal.busy || agentProposal.overlayBlocked}
+                        previewTarget={previewTarget}
+                        compileStatus={latestProposalCompile?.status ?? null}
+                        error={agentProposal.error}
+                        onToggle={() => agentProposal.setDockExpanded((value) => !value)}
+                        onSelect={(item) => {
+                          agentProposal.selectItem(item);
+                          openProposalPath(item.path);
+                        }}
+                        onDecide={(itemId, decision) => void agentProposal.decide(itemId, decision)}
+                        onAcceptAll={() => void agentProposal.acceptAll()}
+                        onRejectAll={() => void agentProposal.rejectAll()}
+                        onPreviewTarget={setPreviewTarget}
+                        onFinish={() => void agentProposal.finish()}
+                      />
+                    ) : null
+                  }
+                  onChange={(entryId, content) => {
+                    setPreviewTarget('accepted');
                     setContents((state) => ({
                       ...state,
                       [entryId]: { ...state[entryId]!, content },
-                    }))
-                  }
+                    }));
+                    if (autoCompileTarget.current) noteAutoCompileActivity();
+                  }}
                   onSave={saveFile}
                   onConflict={(entryId, local, server) =>
                     setConflictState({ entryId, local, server })
                   }
-                  onCursor={(line, column) => setCursor({ line, column })}
+                  onCursor={(line, column) => {
+                    setCursor({ line, column });
+                    if (autoCompileTarget.current) noteAutoCompileActivity();
+                  }}
                   onLanguageStatus={setLspStatus}
                   onSaveState={(entryId, state) =>
                     setSaveStates((value) => ({ ...value, [entryId]: state }))
@@ -1266,9 +1822,14 @@ export default function WorkspacePage() {
                   onRegisterShortcutRunner={(run) => {
                     editorShortcutRef.current = run;
                   }}
+                  onRegisterViewport={(capture) => {
+                    captureViewportRef.current = capture;
+                  }}
                   revealLine={editorIsVisible ? (navigation?.line ?? null) : null}
                   navigationToken={navigation?.token ?? 0}
                   navigationSelections={editorIsVisible ? (navigation?.selections ?? null) : null}
+                  viewportSnapshot={viewportRestore?.snapshot ?? null}
+                  viewportToken={viewportRestore?.token ?? 0}
                   fontSize={appearance.editorFontSize}
                   touchLayout={touchLayout}
                 />
@@ -1316,7 +1877,7 @@ export default function WorkspacePage() {
               )}
               openUrl={appPath(`/projects/${projectId}/pdf/${successfulCompile!.id}`)}
               storageKey={projectId}
-              forwardLocation={forward}
+              forwardLocation={currentPdfSyncResult(forward, successfulCompile!.id)}
               onInverse={(page, x, y) => void inverseSearch(page, x, y)}
               onCollapse={() => {
                 setPreviewVisible(false);
@@ -1335,7 +1896,7 @@ export default function WorkspacePage() {
               <FileImage size={44} />
               <h3>No PDF yet</h3>
               <p>Compile the project to render a preview.</p>
-              <Button variant="primary" onClick={() => compile.mutate('manual')}>
+              <Button variant="primary" onClick={requestManualCompile}>
                 <Play size={15} /> Compile
               </Button>
             </div>
@@ -1413,14 +1974,6 @@ export default function WorkspacePage() {
         history={selected ? editHistories[selected.id] : undefined}
         onCheckout={(nodeId) => void checkoutEditHistory(nodeId)}
         onLoadMore={() => (selected ? loadMoreEditHistory(selected.id) : undefined)}
-      />
-      <SettingsDialog
-        open={settingsOpen}
-        onOpenChange={setSettingsOpen}
-        project={payload.project}
-        entries={entries}
-        onSaved={() => void projectQuery.refetch()}
-        onOpenKeyboardShortcuts={() => setAccountSettings('keyboard-shortcuts')}
       />
       <AccountSettingsDialog
         open={accountSettings !== null}
@@ -1553,6 +2106,19 @@ export default function WorkspacePage() {
               run: () => void openEntry(entry),
             })),
         ]}
+      />
+      <ProjectSearchDialog
+        open={projectSearchOpen}
+        onOpenChange={(open) => {
+          setProjectSearchOpen(open);
+          if (!open) projectSearchRequestRef.current += 1;
+        }}
+        query={projectSearchQuery}
+        onQuery={setProjectSearchQuery}
+        sources={projectSearchSources}
+        loading={projectSearchLoading}
+        failedFiles={projectSearchFailedFiles}
+        onSelect={(result) => void openProjectSearchResult(result)}
       />
       <Dialog
         open={Boolean(conflictState)}
@@ -1704,17 +2270,22 @@ function CommandPalette({
 
 function FileTree({
   entries,
+  proposalChanges,
   selectedId,
   onSelect,
   onMove,
 }: {
   entries: ProjectEntry[];
+  proposalChanges: AgentProposalChange[];
   selectedId: string | null;
   onSelect: (entry: ProjectEntry) => void;
   onMove: (id: string, parentId: string | null) => void;
 }) {
   const [expanded, setExpanded] = useState<Set<string>>(
     () => new Set(entries.filter((entry) => entry.kind === 'folder').map((entry) => entry.id)),
+  );
+  const proposalByEntry = new Map(
+    proposalChanges.filter((change) => change.entryId).map((change) => [change.entryId, change]),
   );
   const children = (parentId: string | null) =>
     entries
@@ -1739,7 +2310,11 @@ function FileTree({
               ? 0
               : -1
           }
-          className={classNames('tree-row', selectedId === entry.id && 'selected')}
+          className={classNames(
+            'tree-row',
+            selectedId === entry.id && 'selected',
+            proposalByEntry.get(entry.id)?.operation === 'delete' && 'proposal-deleted',
+          )}
           style={{ paddingLeft: 7 + depth * 14 }}
           draggable
           onDragStart={(event) => event.dataTransfer.setData('text/entry-id', entry.id)}
@@ -1817,6 +2392,11 @@ function FileTree({
             </>
           )}
           <span>{entry.name}</span>
+          {proposalByEntry.get(entry.id) && (
+            <span className="badge proposal-tree-badge">
+              {proposalByEntry.get(entry.id)?.operation.replace('_file', '').replace('_', ' ')}
+            </span>
+          )}
         </button>
         {entry.kind === 'folder' && expanded.has(entry.id) && render(entry.id, depth + 1)}
       </div>
@@ -2207,140 +2787,6 @@ function HistoryDialog({
         </div>
       </Dialog>
     </>
-  );
-}
-
-function SettingsDialog({
-  open,
-  onOpenChange,
-  project,
-  entries,
-  onSaved,
-  onOpenKeyboardShortcuts,
-}: {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  project: Project;
-  entries: ProjectEntry[];
-  onSaved: () => void;
-  onOpenKeyboardShortcuts: () => void;
-}) {
-  const [name, setName] = useState(project.name);
-  const [compiler, setCompiler] = useState(project.compiler);
-  const [mainFileId, setMainFileId] = useState(project.mainFileId ?? '');
-  const [isTemplate, setIsTemplate] = useState(project.isTemplate);
-  const [pending, setPending] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  useEffect(() => {
-    if (!open) return;
-    setName(project.name);
-    setCompiler(project.compiler);
-    setMainFileId(project.mainFileId ?? '');
-    setIsTemplate(project.isTemplate);
-    setError(null);
-  }, [open, project.compiler, project.isTemplate, project.mainFileId, project.name]);
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange} title="Project settings">
-      <form
-        className="auth-form"
-        onSubmit={async (event) => {
-          event.preventDefault();
-          if (!name.trim()) {
-            setError('Project name is required.');
-            return;
-          }
-          setPending(true);
-          setError(null);
-          try {
-            await api(`/api/v1/projects/${project.id}`, {
-              method: 'PATCH',
-              body: JSON.stringify({ name: name.trim(), compiler, mainFileId, isTemplate }),
-            });
-            onSaved();
-            onOpenChange(false);
-          } catch (cause) {
-            setError(cause instanceof Error ? cause.message : 'Unable to save settings');
-          } finally {
-            setPending(false);
-          }
-        }}
-      >
-        <label className="field">
-          Name
-          <input
-            className="input"
-            disabled={pending}
-            value={name}
-            onChange={(event) => setName(event.target.value)}
-          />
-        </label>
-        <label className="settings-checkbox">
-          <input
-            type="checkbox"
-            disabled={pending}
-            checked={isTemplate}
-            onChange={(event) => setIsTemplate(event.target.checked)}
-          />
-          <span>
-            <strong>Use as template</strong>
-            <small>Show this project in Templates instead of the normal library.</small>
-          </span>
-        </label>
-        <label className="field">
-          Compiler
-          <select
-            className="select"
-            disabled={pending}
-            value={compiler}
-            onChange={(event) => setCompiler(event.target.value as Project['compiler'])}
-          >
-            <option value="pdflatex">pdfLaTeX</option>
-            <option value="xelatex">XeLaTeX</option>
-            <option value="lualatex">LuaLaTeX</option>
-          </select>
-        </label>
-        <label className="field">
-          Main document
-          <select
-            className="select"
-            disabled={pending}
-            value={mainFileId}
-            onChange={(event) => setMainFileId(event.target.value)}
-          >
-            {entries
-              .filter((entry) => entry.kind === 'file' && entry.name.endsWith('.tex'))
-              .map((entry) => (
-                <option key={entry.id} value={entry.id}>
-                  {entry.name}
-                </option>
-              ))}
-          </select>
-        </label>
-        {error && (
-          <p className="form-error" role="alert">
-            {error}
-          </p>
-        )}
-        <Button variant="primary" disabled={pending}>
-          {pending && <LoaderCircle className="spin" size={15} />} Save settings
-        </Button>
-      </form>
-      <div className="settings-shortcuts">
-        <div>
-          <strong>Keyboard shortcuts</strong>
-          <p className="hint">Customize editor and workspace key bindings.</p>
-        </div>
-        <Button
-          type="button"
-          onClick={() => {
-            onOpenChange(false);
-            onOpenKeyboardShortcuts();
-          }}
-        >
-          <Keyboard size={16} aria-hidden="true" /> Configure shortcuts
-        </Button>
-      </div>
-    </Dialog>
   );
 }
 

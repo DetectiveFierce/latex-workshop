@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import Editor, { loader, type OnMount } from '@monaco-editor/react';
 import { get, set, del } from 'idb-keyval';
 import * as Monaco from 'monaco-editor';
@@ -11,6 +11,14 @@ import {
   type ProjectEntry,
   type ShortcutActionId,
 } from '@latex-workshop/contracts';
+import type { AgentProposalStatus } from '@latex-workshop/contracts';
+import {
+  applyBufferEdit,
+  hunkAtProjectedLine,
+  type ProposalEdit,
+  type ProposalFileModel,
+} from '../agent-proposals/proposalDiffModel';
+import { syncProposalOverlay } from '../agent-proposals/proposalEditorDecorations';
 import { registerLatexLanguage, languageFor } from './latexLanguage';
 import { TexLabClient, type TexLabStatus } from './lspClient';
 
@@ -30,6 +38,12 @@ export type SaveMetadata = {
   selectionBefore: EditorSelectionSnapshot | null;
   selectionAfter: EditorSelectionSnapshot | null;
   recoveredDraft?: boolean;
+};
+export type EditorViewportSnapshot = {
+  scrollTop: number;
+  scrollLeft: number;
+  line: number;
+  column: number;
 };
 
 type FileController = {
@@ -77,6 +91,7 @@ export function EditorPane({
   onRegisterSave,
   onRegisterFocus,
   onRegisterShortcutRunner,
+  onRegisterViewport,
   onSourceLocate,
   onSaveState,
   shortcuts,
@@ -86,8 +101,18 @@ export function EditorPane({
   revealLine,
   navigationToken,
   navigationSelections,
+  viewportSnapshot,
+  viewportToken,
   fontSize,
   touchLayout,
+  proposalModel = null,
+  proposalStatus = 'draft',
+  selectedHunkId = null,
+  onSelectHunk,
+  onProposalEdit,
+  onDecideHunk,
+  proposalDock,
+  lspEnabled = true,
 }: {
   projectId: string;
   entry: ProjectEntry;
@@ -110,6 +135,7 @@ export function EditorPane({
   onRegisterSave?: (save: () => Promise<void>) => void;
   onRegisterFocus?: (focus: () => void) => void;
   onRegisterShortcutRunner?: (run: (action: ShortcutActionId) => void) => void;
+  onRegisterViewport?: (capture: () => EditorViewportSnapshot | null) => void;
   onSourceLocate?: (selection: {
     start: { line: number; column: number };
     end: { line: number; column: number };
@@ -125,8 +151,18 @@ export function EditorPane({
   revealLine?: number | null;
   navigationToken?: number;
   navigationSelections?: EditorSelectionSnapshot | null;
+  viewportSnapshot?: EditorViewportSnapshot | null;
+  viewportToken?: number;
   fontSize: number;
   touchLayout: boolean;
+  proposalModel?: ProposalFileModel | null;
+  proposalStatus?: AgentProposalStatus;
+  selectedHunkId?: string | null;
+  onSelectHunk?: (hunkId: string) => void;
+  onProposalEdit?: (edit: ProposalEdit) => void;
+  onDecideHunk?: (hunkId: string, decision: 'accepted' | 'rejected') => void;
+  proposalDock?: ReactNode;
+  lspEnabled?: boolean;
 }) {
   const editorRef = useRef<Monaco.editor.IStandaloneCodeEditor | null>(null);
   const lspRef = useRef<TexLabClient | null>(null);
@@ -139,6 +175,11 @@ export function EditorPane({
   const onChangeRef = useRef(onChange);
   const onSaveStateRef = useRef(onSaveState);
   const onSourceLocateRef = useRef(onSourceLocate);
+  const proposalModelRef = useRef<ProposalFileModel | null>(proposalModel ?? null);
+  const onProposalEditRef = useRef(onProposalEdit);
+  const onSelectHunkRef = useRef(onSelectHunk);
+  const onDecideHunkRef = useRef(onDecideHunk);
+  const previousProposalBufferRef = useRef<string | null>(null);
   const [saveState, setSaveState] = useState<SaveState>('saved');
   const [editorReady, setEditorReady] = useState(false);
   const modelPath = useMemo(() => `file:///workspace/${path}`, [path]);
@@ -148,6 +189,9 @@ export function EditorPane({
   onChangeRef.current = onChange;
   onSaveStateRef.current = onSaveState;
   onSourceLocateRef.current = onSourceLocate;
+  onProposalEditRef.current = onProposalEdit;
+  onSelectHunkRef.current = onSelectHunk;
+  onDecideHunkRef.current = onDecideHunk;
 
   let controller = controllers.current.get(entry.id);
   if (!controller) {
@@ -215,7 +259,7 @@ export function EditorPane({
       if (editor?.getModel() === model) editor.executeEdits('background-sync', [edit]);
       else model.applyEdits([edit]);
       applyingSyncedContent.current = false;
-      lspRef.current?.change(model);
+      if (lspEnabled) lspRef.current?.changeText(model, value);
     }
     onChangeRef.current(target.entryId, value);
   }
@@ -273,7 +317,7 @@ export function EditorPane({
             setControllerSaveState(target, 'dirty');
           }
           const model = Monaco.editor.getModel(Monaco.Uri.parse(target.modelPath));
-          if (model) lspRef.current?.save(model);
+          if (model && lspEnabled) lspRef.current?.saveText(model, value);
         } catch (error) {
           const conflict = conflictDetails(error);
           if (conflict) {
@@ -358,6 +402,7 @@ export function EditorPane({
       if (
         !mounted.current ||
         activeEntryId.current !== entry.id ||
+        proposalModelRef.current ||
         draft === undefined ||
         draft === target.acknowledgedValue
       )
@@ -376,19 +421,78 @@ export function EditorPane({
   useEffect(() => {
     const target = controllers.current.get(entry.id)!;
     target.modelPath = modelPath;
+    if (proposalModel) return;
     if (!target.saveLoop && target.latestValue === target.acknowledgedValue) {
       target.baseVersion = entry.version;
       target.acknowledgedValue = content;
       applySyncedContent(target, content);
       setControllerSaveState(target, 'saved');
     }
-  }, [content, entry.id, entry.version, modelPath]);
+  }, [content, entry.id, entry.version, modelPath, proposalModel]);
+  useEffect(() => {
+    previousProposalBufferRef.current = null;
+  }, [entry.id, path]);
+  useEffect(() => {
+    if (!proposalModel) {
+      proposalModelRef.current = null;
+      return;
+    }
+    const local = proposalModelRef.current;
+    if (local && local.path === proposalModel.path && local.buffer !== proposalModel.buffer) return;
+    proposalModelRef.current = proposalModel;
+  }, [proposalModel]);
+  useEffect(() => {
+    const editor = editorRef.current;
+    const monacoModel = editor?.getModel();
+    const overlay = proposalModel;
+    if (!editorReady || !monacoModel) return;
+    if (overlay) {
+      const current = monacoModel.getValue();
+      const previous = previousProposalBufferRef.current;
+      if (current === overlay.buffer) previousProposalBufferRef.current = overlay.buffer;
+      else if (previous === null || current === previous) {
+        applyingSyncedContent.current = true;
+        monacoModel.setValue(overlay.buffer);
+        applyingSyncedContent.current = false;
+        previousProposalBufferRef.current = overlay.buffer;
+      }
+      if (lspEnabled) lspRef.current?.open(monacoModel, overlay.acceptedText);
+      return;
+    }
+    previousProposalBufferRef.current = null;
+    if (lspEnabled) lspRef.current?.open(monacoModel);
+    else lspRef.current?.close(monacoModel);
+  }, [editorReady, lspEnabled, proposalModel]);
+  useEffect(() => {
+    const editor = editorRef.current;
+    if (!editorReady || !editor || !proposalModel) return;
+    return syncProposalOverlay(Monaco, editor, {
+      model: proposalModel,
+      status: proposalStatus,
+      selectedHunkId,
+      onSelectHunk: (hunkId) => onSelectHunkRef.current?.(hunkId),
+      onDecide: (hunkId, decision) => onDecideHunkRef.current?.(hunkId, decision),
+    });
+  }, [editorReady, proposalModel, proposalStatus, selectedHunkId]);
   useEffect(() => {
     onRegisterSave?.(() => flush(activeEntryId.current));
   });
   useEffect(() => {
     onRegisterFocus?.(() => editorRef.current?.focus());
   }, [onRegisterFocus]);
+  useEffect(() => {
+    onRegisterViewport?.(() => {
+      const editor = editorRef.current;
+      const position = editor?.getPosition();
+      if (!editor || !position) return null;
+      return {
+        scrollTop: editor.getScrollTop(),
+        scrollLeft: editor.getScrollLeft(),
+        line: position.lineNumber,
+        column: position.column,
+      };
+    });
+  }, [onRegisterViewport]);
   useEffect(() => {
     onRegisterShortcutRunner?.((action) => {
       const definition = shortcutRegistry.find((item) => item.id === action);
@@ -429,10 +533,20 @@ export function EditorPane({
     }
   }, [navigationSelections, navigationToken, revealLine]);
   useEffect(() => {
+    const editor = editorRef.current;
+    if (!editorReady || !editor || !viewportSnapshot) return;
+    editor.setPosition({ lineNumber: viewportSnapshot.line, column: viewportSnapshot.column });
+    editor.setScrollPosition({
+      scrollTop: viewportSnapshot.scrollTop,
+      scrollLeft: viewportSnapshot.scrollLeft,
+    });
+  }, [editorReady, viewportSnapshot, viewportToken]);
+  useEffect(() => {
     const handle = window.setTimeout(() => {
       const model = editorRef.current?.getModel();
       if (model) {
-        lspRef.current?.open(model);
+        if (lspEnabled)
+          lspRef.current?.open(model, proposalModelRef.current?.acceptedText ?? model.getValue());
         const selection = controllers.current.get(entry.id)?.selection;
         if (selection?.length)
           editorRef.current?.setSelections(
@@ -457,7 +571,7 @@ export function EditorPane({
       }
     });
     return () => window.clearTimeout(handle);
-  }, [entry.id, modelPath]);
+  }, [entry.id, lspEnabled, modelPath]);
 
   const mount: OnMount = (editor, monaco) => {
     editorRef.current = editor;
@@ -478,12 +592,23 @@ export function EditorPane({
     }
     const model = editor.getModel();
     controllers.current.get(entry.id)!.selection = snapshotSelections(editor.getSelections());
-    if (model) setTimeout(() => lspRef.current?.open(model), 500);
+    if (model && lspEnabled)
+      setTimeout(
+        () =>
+          lspRef.current?.open(model, proposalModelRef.current?.acceptedText ?? model.getValue()),
+        500,
+      );
     editor.onDidPaste(() => window.setTimeout(() => void flush()));
     editor.onDidBlurEditorText(() => void flush());
     editor.onDidChangeCursorPosition(({ position, reason }) => {
       onCursor(position.lineNumber, position.column);
-      if (reason === monaco.editor.CursorChangeReason.Explicit) void flush(activeEntryId.current);
+      const overlay = proposalModelRef.current;
+      if (overlay) {
+        const hunkId = hunkAtProjectedLine(overlay, position.lineNumber);
+        if (hunkId) onSelectHunkRef.current?.(hunkId);
+      }
+      if (reason === monaco.editor.CursorChangeReason.Explicit && !overlay)
+        void flush(activeEntryId.current);
     });
   };
 
@@ -557,12 +682,47 @@ export function EditorPane({
           if (applyingSyncedContent.current) return;
           const target = controllers.current.get(activeEntryId.current);
           if (!target) return;
+          const overlay = proposalModelRef.current;
+          if (overlay) {
+            let current = overlay;
+            for (const change of event.changes) {
+              const result = applyBufferEdit(current, {
+                rangeOffset: change.rangeOffset,
+                rangeLength: change.rangeLength,
+                text: change.text,
+              });
+              if (result.edit.kind === 'ignore') {
+                const model = editorRef.current?.getModel();
+                if (model && model.getValue() !== current.buffer) {
+                  applyingSyncedContent.current = true;
+                  model.setValue(current.buffer);
+                  applyingSyncedContent.current = false;
+                }
+                continue;
+              }
+              if (result.model.buffer !== value) {
+                const model = editorRef.current?.getModel();
+                if (model) {
+                  applyingSyncedContent.current = true;
+                  model.setValue(result.model.buffer);
+                  applyingSyncedContent.current = false;
+                }
+              }
+              current = result.model;
+              proposalModelRef.current = current;
+              onProposalEditRef.current?.(result.edit);
+              const proposalEditorModel = editorRef.current?.getModel();
+              if (proposalEditorModel && lspEnabled)
+                lspRef.current?.changeText(proposalEditorModel, result.model.buffer);
+            }
+            return;
+          }
           target.latestValue = value;
           onChange(target.entryId, value);
           setControllerSaveState(target, 'dirty');
           void set(draftKeyFor(projectId, target.entryId), value);
           const model = editorRef.current?.getModel();
-          if (model) lspRef.current?.change(model);
+          if (model && lspEnabled) lspRef.current?.change(model);
           if (target.timer) clearTimeout(target.timer);
           const boundary = event.changes.some((change) => change.text.includes('\n'));
           target.timer = setTimeout(() => void flush(target.entryId), boundary ? 0 : 750);
@@ -574,6 +734,7 @@ export function EditorPane({
           fontSize,
           lineHeight: Math.round(fontSize * 1.62),
           minimap: { enabled: !touchLayout },
+          glyphMargin: true,
           wordWrap: 'on',
           tabSize: 2,
           insertSpaces: true,
@@ -588,6 +749,7 @@ export function EditorPane({
           accessibilitySupport: 'auto',
         }}
       />
+      {proposalDock}
       <span className="sr-only" role="status">
         {saveState === 'saved' ? 'Changes saved' : saveState}
       </span>

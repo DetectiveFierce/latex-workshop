@@ -52,11 +52,22 @@ export const syncTexRecordSchema = z.object({
 });
 export type SyncTexRecord = z.infer<typeof syncTexRecordSchema>;
 
+export const syncSourceIdentitySchema = z.discriminatedUnion('target', [
+  z.object({ target: z.literal('accepted') }),
+  z.object({
+    target: z.literal('proposal'),
+    proposalId: z.string().uuid(),
+    proposalRevision: z.number().int().nonnegative(),
+  }),
+]);
+export type SyncSourceIdentity = z.infer<typeof syncSourceIdentitySchema>;
+
 export const forwardSyncRequestSchema = z.object({
   path: z.string().min(1).max(1_024),
   selection: sourceSelectionSchema,
   entryVersion: z.number().int().nonnegative(),
   pageHint: z.number().int().positive().optional(),
+  source: syncSourceIdentitySchema.default({ target: 'accepted' }),
 });
 export type ForwardSyncRequest = z.infer<typeof forwardSyncRequestSchema>;
 
@@ -74,7 +85,9 @@ export const pdfSyncResultSchema = z.object({
 });
 export type PdfSyncResult = z.infer<typeof pdfSyncResultSchema>;
 
-export const inverseSyncRequestSchema = pdfPointSchema;
+export const inverseSyncRequestSchema = pdfPointSchema.extend({
+  source: syncSourceIdentitySchema.default({ target: 'accepted' }),
+});
 export type InverseSyncRequest = z.infer<typeof inverseSyncRequestSchema>;
 
 export const inverseSyncResultSchema = z.object({

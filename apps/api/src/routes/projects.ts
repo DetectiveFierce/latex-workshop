@@ -224,6 +224,7 @@ export async function registerProjectRoutes(app: FastifyInstance, context: AppCo
       await Promise.all([
         context.storage.deletePrefix(`artifacts/${projectId}/`),
         context.storage.deletePrefix(`edit-history/${projectId}/`),
+        context.storage.deletePrefix(`proposals/${user.id}/${projectId}/`),
       ]);
       await context.db.delete(projects).where(eq(projects.id, projectId));
       await context.db
