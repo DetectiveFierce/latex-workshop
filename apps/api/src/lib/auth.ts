@@ -5,7 +5,7 @@ import { mcp } from '@better-auth/mcp';
 import { cimd } from '@better-auth/cimd';
 import { fetchClientMetadataResource } from '@better-auth/cimd/node';
 import nodemailer from 'nodemailer';
-import type { AppConfig } from '@latex-workshop/config';
+import { trustedWebOrigins, type AppConfig } from '@latex-workshop/config';
 import type { Database } from '@latex-workshop/db';
 import {
   accounts,
@@ -50,7 +50,7 @@ export function createAuth(db: Database, storage: ObjectStorage, config: AppConf
     baseURL: publicApiUrl.origin,
     basePath: publicAuthBasePath(config.API_ORIGIN),
     secret: config.AUTH_SECRET,
-    trustedOrigins: [config.WEB_ORIGIN],
+    trustedOrigins: trustedWebOrigins(config),
     database: drizzleAdapter(db, {
       provider: 'pg',
       schema: {

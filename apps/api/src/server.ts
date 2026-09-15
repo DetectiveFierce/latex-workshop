@@ -8,7 +8,7 @@ import swagger from '@fastify/swagger';
 import swaggerUi from '@fastify/swagger-ui';
 import { sql } from 'drizzle-orm';
 import { z } from 'zod';
-import { loadConfig } from '@latex-workshop/config';
+import { loadConfig, trustedWebOrigins } from '@latex-workshop/config';
 import { buildOpenApiDocument } from '@latex-workshop/contracts';
 import { createContext } from './lib/context.js';
 import { HttpError } from './lib/errors.js';
@@ -35,6 +35,7 @@ import { registerAgentProposalRoutes } from './routes/agent-proposals.js';
 
 export async function buildServer() {
   const config = loadConfig();
+  const webOrigins = trustedWebOrigins(config);
   const context = createContext(config);
   const app = Fastify({
     logger: {
@@ -48,7 +49,7 @@ export async function buildServer() {
 
   await context.storage.ensureBucket();
   await app.register(cors, {
-    origin: config.WEB_ORIGIN,
+    origin: webOrigins,
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   });
@@ -62,7 +63,7 @@ export async function buildServer() {
         workerSrc: ["'self'", 'blob:'],
         connectSrc: [
           "'self'",
-          config.WEB_ORIGIN,
+          ...webOrigins,
           config.API_ORIGIN,
           config.API_ORIGIN.replace('http', 'ws'),
         ],

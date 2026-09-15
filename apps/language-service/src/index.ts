@@ -9,7 +9,7 @@ import { drizzleAdapter } from 'better-auth/adapters/drizzle';
 import { fromNodeHeaders } from 'better-auth/node';
 import { and, eq, sql } from 'drizzle-orm';
 import { WebSocketServer, type WebSocket } from 'ws';
-import { loadConfig } from '@latex-workshop/config';
+import { loadConfig, trustedWebOrigins } from '@latex-workshop/config';
 import { buildEntryPaths } from '@latex-workshop/contracts';
 import {
   accounts,
@@ -38,7 +38,7 @@ const auth = betterAuth({
   baseURL: config.API_ORIGIN,
   basePath: '/api/auth',
   secret: config.AUTH_SECRET,
-  trustedOrigins: [config.WEB_ORIGIN],
+  trustedOrigins: trustedWebOrigins(config),
   database: drizzleAdapter(db, {
     provider: 'pg',
     schema: { user: users, session: sessions, account: accounts, verification: verifications },

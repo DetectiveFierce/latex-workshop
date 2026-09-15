@@ -85,6 +85,9 @@ tailscale serve status
 
 Do not use Funnel. The expected origins must be full HTTPS `*.ts.net` URLs; the S3 public endpoint
 uses port `8443` so browser-direct signed uploads do not create mixed-content failures.
+If the edge proxy also serves a trusted short hostname, list its exact origin in
+`ADDITIONAL_TRUSTED_ORIGINS` (comma-separated for multiple aliases). This keeps authentication,
+CORS, CSP, and language-service origin checks aligned without allowing arbitrary tailnet hosts.
 
 ## Private MCP ingress
 

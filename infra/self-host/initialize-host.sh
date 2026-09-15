@@ -37,6 +37,7 @@ if [ ! -f "$env_file" ]; then
     printf '%s\n' \
       'WEB_ORIGIN=https://mind-palace.tail7e24aa.ts.net' \
       'API_ORIGIN=https://mind-palace.tail7e24aa.ts.net' \
+      'ADDITIONAL_TRUSTED_ORIGINS=https://mind-palace' \
       'S3_PUBLIC_ENDPOINT=https://mind-palace.tail7e24aa.ts.net:8443' \
       'SMTP_FROM=LaTeX Workshop <noreply@latex-workshop.local>' \
       'POSTGRES_USER=latex' \
@@ -58,6 +59,8 @@ fi
 
 grep -q '^BACKUP_UID=' "$env_file" || printf 'BACKUP_UID=%s\n' "$(id -u)" >>"$env_file"
 grep -q '^BACKUP_GID=' "$env_file" || printf 'BACKUP_GID=%s\n' "$(id -g)" >>"$env_file"
+grep -q '^ADDITIONAL_TRUSTED_ORIGINS=' "$env_file" || \
+  printf '%s\n' 'ADDITIONAL_TRUSTED_ORIGINS=https://mind-palace' >>"$env_file"
 
 tmp_env=$deploy_root/.env.next
 sed \

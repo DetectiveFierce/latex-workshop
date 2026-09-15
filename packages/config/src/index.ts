@@ -5,12 +5,26 @@ import { z } from 'zod';
 
 const bool = z.enum(['true', 'false']).transform((value) => value === 'true');
 const optionalUrl = z.preprocess((value) => (value === '' ? undefined : value), z.url().optional());
+const additionalTrustedOrigins = z.preprocess(
+  (value) =>
+    typeof value === 'string'
+      ? value
+          .split(',')
+          .map((origin) => origin.trim())
+          .filter(Boolean)
+      : value,
+  z
+    .array(z.url())
+    .default([])
+    .transform((origins) => [...new Set(origins.map((origin) => new URL(origin).origin))]),
+);
 const positiveInteger = z.coerce.number().int().positive().safe();
 const port = positiveInteger.max(65_535);
 const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   WEB_ORIGIN: z.url().default('http://localhost:5173'),
   API_ORIGIN: z.url().default('http://localhost:3001'),
+  ADDITIONAL_TRUSTED_ORIGINS: additionalTrustedOrigins,
   API_PORT: port.default(3001),
   LSP_PORT: port.default(3002),
   DATABASE_URL: z.string().min(1),
@@ -77,9 +91,11 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     throw new Error('AUTH_SECRET must be replaced before running in production');
   if (
     config.NODE_ENV === 'production' &&
-    [config.WEB_ORIGIN, config.API_ORIGIN].some((origin) => new URL(origin).protocol !== 'https:')
+    [config.WEB_ORIGIN, config.API_ORIGIN, ...config.ADDITIONAL_TRUSTED_ORIGINS].some(
+      (origin) => new URL(origin).protocol !== 'https:',
+    )
   )
-    throw new Error('WEB_ORIGIN and API_ORIGIN must use HTTPS in production');
+    throw new Error('Public and trusted origins must use HTTPS in production');
   if (config.AGENT_MCP_ENABLED && !config.AGENT_MCP_RESOURCE_URL)
     throw new Error('AGENT_MCP_RESOURCE_URL is required when AGENT_MCP_ENABLED=true');
   if (
@@ -89,4 +105,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   )
     throw new Error('AGENT_MCP_RESOURCE_URL must use HTTPS in production');
   return config;
+}
+
+export function trustedWebOrigins(
+  config: Pick<AppConfig, 'WEB_ORIGIN' | 'ADDITIONAL_TRUSTED_ORIGINS'>,
+): string[] {
+  return [...new Set([new URL(config.WEB_ORIGIN).origin, ...config.ADDITIONAL_TRUSTED_ORIGINS])];
 }

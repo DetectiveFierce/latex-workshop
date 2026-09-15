@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { loadConfig } from './index.js';
+import { loadConfig, trustedWebOrigins } from './index.js';
 
 const base = {
   NODE_ENV: 'production',
@@ -20,6 +20,7 @@ describe('loadConfig', () => {
     const config = loadConfig({ ...base });
     expect(config.S3_PUBLIC_ENDPOINT).toBeUndefined();
     expect(config.S3_FORCE_PATH_STYLE).toBe(false);
+    expect(config.ADDITIONAL_TRUSTED_ORIGINS).toEqual([]);
     expect(config.AGENT_MCP_ACCESS_TOKEN_TTL_SECONDS).toBe(3_600);
     expect(config.AGENT_MCP_REFRESH_TOKEN_TTL_DAYS).toBe(365);
   });
@@ -39,6 +40,29 @@ describe('loadConfig', () => {
 
   it('requires public origins to use TLS in production', () => {
     expect(() => loadConfig({ ...base, WEB_ORIGIN: 'http://workshop.example.com' })).toThrow(
+      'HTTPS',
+    );
+  });
+
+  it('parses, normalizes, and deduplicates additional trusted origins', () => {
+    const config = loadConfig({
+      ...base,
+      ADDITIONAL_TRUSTED_ORIGINS:
+        ' https://mind-palace, https://mind-palace.tailnet.example/path,https://mind-palace ',
+    });
+    expect(config.ADDITIONAL_TRUSTED_ORIGINS).toEqual([
+      'https://mind-palace',
+      'https://mind-palace.tailnet.example',
+    ]);
+    expect(trustedWebOrigins(config)).toEqual([
+      'https://workshop.example.com',
+      'https://mind-palace',
+      'https://mind-palace.tailnet.example',
+    ]);
+  });
+
+  it('requires additional trusted origins to use TLS in production', () => {
+    expect(() => loadConfig({ ...base, ADDITIONAL_TRUSTED_ORIGINS: 'http://mind-palace' })).toThrow(
       'HTTPS',
     );
   });
