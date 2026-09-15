@@ -13,6 +13,7 @@ export function ProposalEditorDock({
   expanded,
   busy,
   previewTarget,
+  acceptedSourceAvailable,
   compileStatus,
   error,
   onToggle,
@@ -31,6 +32,7 @@ export function ProposalEditorDock({
   expanded: boolean;
   busy: boolean;
   previewTarget: 'accepted' | 'proposal';
+  acceptedSourceAvailable: boolean;
   compileStatus?: CompileJob['status'] | null;
   error: string;
   onToggle: () => void;
@@ -53,6 +55,12 @@ export function ProposalEditorDock({
             <div className="proposal-preview-toggle" aria-label="PDF source">
               <button
                 className={previewTarget === 'accepted' ? 'active' : ''}
+                disabled={!acceptedSourceAvailable}
+                title={
+                  acceptedSourceAvailable
+                    ? undefined
+                    : 'The accepted main file is empty until proposal changes are accepted'
+                }
                 onClick={() => onPreviewTarget('accepted')}
               >
                 Accepted

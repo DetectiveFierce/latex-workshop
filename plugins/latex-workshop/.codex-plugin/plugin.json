@@ -1,0 +1,24 @@
+{
+  "name": "latex-workshop",
+  "version": "1.0.0+codex.20260914234202",
+  "description": "Organize, create, edit, compile, tag, and review private Mind Palace LaTeX Workshop projects.",
+  "author": {
+    "name": "Mind Palace"
+  },
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "LaTeX Workshop",
+    "shortDescription": "Organize, edit, and compile private LaTeX projects.",
+    "longDescription": "Organize folders and tags, place projects intelligently, and edit site-hosted LaTeX Workshop projects from ChatGPT or Codex through project-scoped access and reviewable, compiled proposals.",
+    "developerName": "Mind Palace",
+    "category": "Productivity",
+    "capabilities": ["Read", "Write", "Organize"],
+    "defaultPrompt": [
+      "Edit my LaTeX Workshop project.",
+      "Fix and compile my Mind Palace paper.",
+      "Create a LaTeX Workshop project from a template.",
+      "Organize my LaTeX Workshop projects into folders and tags."
+    ]
+  },
+  "apps": "./.app.json"
+}

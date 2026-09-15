@@ -28,6 +28,28 @@ export function publicMcpResourceUrl(apiOrigin: string): string {
   return `${apiOrigin.replace(/\/+$/, '')}/api/mcp`;
 }
 
+export function pathAwareProtectedResourceMetadataPath(apiOrigin: string): string {
+  return `/.well-known/oauth-protected-resource${new URL(publicMcpResourceUrl(apiOrigin)).pathname}`;
+}
+
+export function canonicalWellKnownRequestUrl(apiOrigin: string, rawUrl: string): string {
+  const url = new URL(rawUrl, 'http://internal.invalid');
+  if (
+    url.pathname === '/.well-known/oauth-protected-resource/api/mcp' ||
+    url.pathname === pathAwareProtectedResourceMetadataPath(apiOrigin)
+  )
+    url.pathname = '/.well-known/oauth-protected-resource';
+  return `${url.pathname}${url.search}`;
+}
+
+export function protectedResourceMetadataUrl(resource: string): string {
+  const url = new URL(resource);
+  url.pathname = `/.well-known/oauth-protected-resource${url.pathname.replace(/\/+$/, '')}`;
+  url.search = '';
+  url.hash = '';
+  return url.href;
+}
+
 /** RFC 8414 / RFC 9728 discovery is origin-rooted even when the app lives under a subpath. */
 export function publicWellKnownUrl(apiOrigin: string, rawUrl: string): URL {
   return new URL(rawUrl, new URL(apiOrigin).origin);

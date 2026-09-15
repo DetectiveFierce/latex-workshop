@@ -185,6 +185,16 @@ export const startAgentProposalSchema = z.object({
 
 export const createAgentProjectSchema = z.object({
   name: z.string().trim().min(1).max(120).describe('Name for the new project'),
+  folderId: idSchema
+    .nullable()
+    .optional()
+    .describe('Existing Library folder selected from list_projects; null/omit uses Library root'),
+  tagIds: z
+    .array(idSchema)
+    .max(50)
+    .refine((ids) => new Set(ids).size === ids.length, { message: 'Tag ids must be unique' })
+    .optional()
+    .describe('Existing Library tags selected from list_projects to assign to the new project'),
   sourceProjectId: idSchema
     .optional()
     .describe(
@@ -198,6 +208,66 @@ export const createAgentProjectSchema = z.object({
     ),
   idempotencyKey: z.uuid().describe('Fresh UUID for creating this project'),
 });
+
+const agentLibraryMutationBaseSchema = z.object({
+  idempotencyKey: z.uuid().describe('Fresh UUID for this mutation'),
+});
+
+export const agentLibraryMutationSchema = z.discriminatedUnion('action', [
+  agentLibraryMutationBaseSchema.extend({
+    action: z.literal('create_folder'),
+    name: z.string().trim().min(1).max(120),
+    parentId: idSchema.nullable().default(null),
+  }),
+  agentLibraryMutationBaseSchema
+    .extend({
+      action: z.literal('update_folder'),
+      folderId: idSchema,
+      name: z.string().trim().min(1).max(120).optional(),
+      parentId: idSchema.nullable().optional(),
+    })
+    .refine((value) => value.name !== undefined || value.parentId !== undefined, {
+      message: 'Provide a name or destination',
+    }),
+  agentLibraryMutationBaseSchema.extend({
+    action: z.literal('trash_folder'),
+    folderId: idSchema,
+  }),
+  agentLibraryMutationBaseSchema.extend({
+    action: z.literal('create_tag'),
+    name: z.string().trim().min(1).max(40),
+    color: z
+      .enum(['slate', 'green', 'cyan', 'blue', 'amber', 'orange', 'magenta', 'red'])
+      .default('green'),
+  }),
+  agentLibraryMutationBaseSchema
+    .extend({
+      action: z.literal('update_tag'),
+      tagId: idSchema,
+      name: z.string().trim().min(1).max(40).optional(),
+      color: z
+        .enum(['slate', 'green', 'cyan', 'blue', 'amber', 'orange', 'magenta', 'red'])
+        .optional(),
+    })
+    .refine((value) => value.name !== undefined || value.color !== undefined, {
+      message: 'Provide a name or color',
+    }),
+  agentLibraryMutationBaseSchema.extend({ action: z.literal('delete_tag'), tagId: idSchema }),
+  agentLibraryMutationBaseSchema.extend({
+    action: z.literal('move_project'),
+    projectId: idSchema,
+    folderId: idSchema.nullable(),
+  }),
+  agentLibraryMutationBaseSchema.extend({
+    action: z.literal('set_project_tags'),
+    projectId: idSchema,
+    tagIds: z
+      .array(idSchema)
+      .max(50)
+      .refine((ids) => new Set(ids).size === ids.length, { message: 'Tag ids must be unique' }),
+  }),
+]);
+export type AgentLibraryMutation = z.infer<typeof agentLibraryMutationSchema>;
 
 export const renameAgentProjectSchema = z.object({
   projectId: idSchema.describe('Project id selected from list_projects'),

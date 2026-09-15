@@ -7,6 +7,23 @@ export type ParsedOAuthConsentQuery = {
 
 const preservedConsentKey = 'latex-workshop:oauth-consent-query';
 
+function normalizeSignedOAuthQuery(raw: string): string {
+  const params = new URLSearchParams(raw);
+  const signedParameterNames = params.getAll('ba_param');
+  if (signedParameterNames.length !== 1) return raw;
+  const serializedParameterNames = signedParameterNames.at(0);
+  if (serializedParameterNames === undefined) return raw;
+  try {
+    const parsed = JSON.parse(serializedParameterNames) as unknown;
+    if (!Array.isArray(parsed) || !parsed.every((value) => typeof value === 'string')) return raw;
+    params.delete('ba_param');
+    for (const parameterName of parsed) params.append('ba_param', parameterName);
+    return params.toString();
+  } catch {
+    return raw;
+  }
+}
+
 export function captureOAuthConsentQuery(pathname: string, search: string) {
   if (!pathname.endsWith('/oauth/consent')) return;
   const raw = search.startsWith('?') ? search.slice(1) : search;
@@ -22,9 +39,9 @@ export function preservedOAuthConsentQuery(search: string): string {
 export function oauthAuthorizationQuery(search: string): string | null {
   const params = new URLSearchParams(search);
   const nested = params.get('oauth_query');
-  if (nested) return nested;
+  if (nested) return normalizeSignedOAuthQuery(nested);
   if (!params.get('client_id') || !params.get('sig')) return null;
-  return search.startsWith('?') ? search.slice(1) : search;
+  return normalizeSignedOAuthQuery(search.startsWith('?') ? search.slice(1) : search);
 }
 
 export function clearPreservedOAuthConsentQuery() {
@@ -34,7 +51,9 @@ export function clearPreservedOAuthConsentQuery() {
 export function parseOAuthConsentQuery(search: string): ParsedOAuthConsentQuery {
   const params = new URLSearchParams(search);
   const nested = params.get('oauth_query');
-  const raw = nested ?? (search.startsWith('?') ? search.slice(1) : search);
+  const raw = normalizeSignedOAuthQuery(
+    nested ?? (search.startsWith('?') ? search.slice(1) : search),
+  );
   const signed = new URLSearchParams(raw);
   const clientId = signed.get('client_id') ?? '';
   return {

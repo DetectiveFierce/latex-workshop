@@ -12,6 +12,7 @@ import {
   readTextFileSchema,
   renameAgentProjectSchema,
   reviseAgentProposalHunkSchema,
+  selectCheckpointMainFile,
 } from './index.js';
 
 const legacy = {
@@ -75,6 +76,31 @@ describe('agent proposal contracts', () => {
         },
       ]),
     ).toThrow();
+  });
+
+  it('selects a main file from proposal-only checkpoint content', () => {
+    const proposalEntry = {
+      ...legacy,
+      entryId: '33333333-3333-4333-8333-333333333333',
+      versionId: null,
+      source: {
+        kind: 'proposal' as const,
+        proposalId: '44444444-4444-4444-8444-444444444444',
+        revision: 1,
+        contentHash: 'b'.repeat(64),
+      },
+    };
+    const manifest = checkpointManifestSchema.parse([
+      { ...proposalEntry, path: 'chapters/appendix.tex' },
+      { ...proposalEntry, entryId: '55555555-5555-4555-8555-555555555555' },
+    ]);
+
+    expect(selectCheckpointMainFile(manifest, null, true)?.path).toBe('main.tex');
+    expect(selectCheckpointMainFile(manifest.slice(0, 1), null, true)?.path).toBe(
+      'chapters/appendix.tex',
+    );
+    expect(selectCheckpointMainFile(manifest, legacy.entryId)?.path).toBe('main.tex');
+    expect(selectCheckpointMainFile(manifest, null)).toBeNull();
   });
 
   it('enforces independent proposal write and read limits', () => {

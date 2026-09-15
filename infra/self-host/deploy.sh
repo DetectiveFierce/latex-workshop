@@ -97,6 +97,7 @@ fi
 write_source_manifest() {
   local destination=$1
   find . -type f \
+    ! -path './.git' \
     ! -path './.git/*' \
     ! -path '*/node_modules/*' \
     ! -path '*/.turbo/*' \

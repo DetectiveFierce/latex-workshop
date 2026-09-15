@@ -10,7 +10,7 @@
     "start": "node dist/index.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint src",
-    "test": "vitest run"
+    "test": "vitest run --exclude 'dist/**'"
   },
   "dependencies": {
     "@latex-workshop/config": "workspace:*",
@@ -20,7 +20,7 @@
     "bullmq": "6.3.1",
     "drizzle-orm": "0.45.2",
     "ioredis": "5.7.0",
-    "zod": "4.3.6"
+    "zod": "4.6.5"
   },
   "devDependencies": {
     "tsx": "4.20.5"

@@ -185,6 +185,16 @@ body {
   align-items: center;
   gap: 8px;
 }
+.agent-chatgpt-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--hon-muted);
+  font-size: 0.9rem;
+}
+.agent-chatgpt-row .button {
+  flex: 0 0 auto;
+}
 .agent-endpoint-row code {
   min-width: 0;
   flex: 1;
@@ -196,6 +206,13 @@ body {
   background: var(--hon-terminal);
   border: 1px solid var(--hon-border);
   border-radius: 6px;
+}
+@media (max-width: 640px) {
+  .agent-chatgpt-row,
+  .agent-endpoint-row {
+    align-items: stretch;
+    flex-direction: column;
+  }
 }
 .agent-connection-card > .hint {
   overflow-wrap: anywhere;
@@ -1247,6 +1264,9 @@ p {
   display: grid;
   grid-template-rows: 36px minmax(0, 1fr);
 }
+.editor-panel.project-search-open {
+  grid-template-rows: 36px auto minmax(0, 1fr);
+}
 .tab-bar {
   display: flex;
   overflow-x: auto;
@@ -1866,52 +1886,318 @@ p {
     monospace;
 }
 
-.project-search .searchbox {
-  max-width: none;
+.project-find-bar {
+  position: relative;
+  z-index: 16;
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+  padding: 5px 6px;
+  color: var(--hon-text);
+  background: var(--hon-app);
+  border-bottom: 1px solid var(--hon-border);
+  box-shadow: 0 6px 16px #00000038;
 }
-.project-search-summary {
-  min-height: 28px;
-  padding: 8px 2px 4px;
+.project-find-row {
+  min-width: 520px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.project-find-bar {
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+.project-find-bar .icon-button {
+  flex: 0 0 27px;
+  width: 27px;
+  min-width: 27px;
+  height: 27px;
+  min-height: 27px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+}
+.project-find-bar .icon-button:hover:not(:disabled) {
+  border-color: var(--hon-border);
+}
+.project-find-toggle,
+.project-find-spacer {
+  flex: 0 0 27px;
+}
+.project-find-input {
+  min-width: 180px;
+  height: 29px;
+  flex: 1 1 440px;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 3px 0 8px;
+  color: var(--hon-text-bright);
+  background: var(--hon-terminal);
+  border: 1px solid var(--hon-border);
+  border-radius: 5px;
+}
+.project-find-input:focus-within {
+  border-color: var(--hon-green);
+  box-shadow: 0 0 0 1px #a6e22e3d;
+}
+.project-find-input.invalid {
+  border-color: var(--hon-red);
+}
+.project-find-input > svg {
+  flex: 0 0 auto;
+  color: var(--hon-muted);
+}
+.project-find-input input {
+  min-width: 70px;
+  height: 100%;
+  flex: 1;
+  padding: 0 4px;
+  color: var(--hon-text-bright);
+  background: transparent;
+  border: 0;
+  outline: 0;
+  font:
+    calc(12px * var(--editor-font-scale)) 'JetBrains Mono',
+    monospace;
+}
+.project-find-input input::placeholder {
+  color: var(--hon-muted);
+  opacity: 1;
+}
+.project-find-input input::-webkit-search-cancel-button {
+  filter: invert(80%);
+}
+.project-find-option {
+  flex: 0 0 25px;
+  height: 23px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  color: var(--hon-muted);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  cursor: pointer;
+  font:
+    11px 'JetBrains Mono',
+    monospace;
+}
+.project-find-option:hover {
+  color: var(--hon-text-bright);
+  background: var(--hon-surface-hover);
+}
+.project-find-option.active {
+  color: var(--hon-text-bright);
+  background: var(--hon-active);
+  border-color: var(--hon-green);
+}
+.project-find-option.underlined {
+  text-decoration: underline;
+}
+.project-find-count {
+  min-width: 74px;
+  padding: 0 4px;
+  color: var(--hon-muted);
+  text-align: right;
+  white-space: nowrap;
+  font-size: calc(11px * var(--ui-font-scale));
+}
+.project-find-count.error {
+  color: var(--hon-red);
+}
+.project-replace-row .project-find-input {
+  margin-right: 78px;
+}
+.project-results {
+  height: 100%;
+  overflow: auto;
+  padding: 14px 16px 28px;
+  color: var(--hon-text);
+  background: var(--hon-editor);
+}
+.project-results-heading {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 0 4px 12px;
+  color: var(--hon-text-bright);
+}
+.project-results-heading span {
   color: var(--hon-muted);
   font-size: calc(12px * var(--ui-font-scale));
 }
-.project-search-results {
-  max-height: min(55vh, 520px);
-  overflow: auto;
-  padding: 4px;
-  background: var(--hon-terminal);
+.project-result-group {
+  margin-bottom: 12px;
+  overflow: hidden;
+  background: var(--hon-app);
   border: 1px solid var(--hon-border);
   border-radius: 7px;
 }
-.project-search-results button {
-  width: 100%;
-  display: grid;
-  gap: 5px;
-  padding: 9px 10px;
-  color: var(--hon-text);
-  background: none;
-  border: 0;
-  border-radius: 5px;
-  text-align: left;
-}
-.project-search-results button.active {
-  color: var(--hon-text-bright);
-  background: var(--hon-active);
-}
-.project-search-location {
+.project-result-group > header {
+  min-height: 34px;
   display: flex;
-  gap: 8px;
+  align-items: center;
+  gap: 7px;
+  padding: 0 10px;
+  color: var(--hon-text-bright);
+  background: var(--hon-surface);
+  border-bottom: 1px solid var(--hon-border);
+  font-size: calc(12px * var(--ui-font-scale));
+}
+.project-result-group > header strong {
+  overflow: hidden;
+  flex: 1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.project-result-group > header span {
+  color: var(--hon-muted);
+  font-variant-numeric: tabular-nums;
+}
+.project-result {
+  border-bottom: 1px solid color-mix(in srgb, var(--hon-border) 58%, transparent);
+}
+.project-result:last-child {
+  border-bottom: 0;
+}
+.project-result.active {
+  background: var(--hon-active);
+  box-shadow: inset 2px 0 var(--hon-green);
+}
+.project-result-row {
+  min-width: 0;
+  height: 33px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding-right: 10px;
+  cursor: default;
+}
+.project-result-row:focus-visible {
+  outline: 1px solid var(--hon-green);
+  outline-offset: -2px;
+}
+.project-result-row .icon-button {
+  width: 28px;
+  min-width: 28px;
+  height: 28px;
+  min-height: 28px;
+}
+.project-result-location {
+  flex: 0 0 66px;
+  color: var(--hon-muted);
+  text-align: right;
+  font:
+    calc(11px * var(--editor-font-scale)) 'JetBrains Mono',
+    monospace;
+  font-variant-numeric: tabular-nums;
+}
+.project-result-row code {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--hon-text-bright);
+  text-overflow: ellipsis;
+  white-space: pre;
+  font-size: calc(12px * var(--editor-font-scale));
+}
+.project-result-context {
+  padding: 5px 10px 8px 42px;
+  overflow-x: auto;
+  color: var(--hon-text);
+  background: var(--hon-terminal);
+}
+.project-result-context > div {
+  min-height: 22px;
+  display: grid;
+  grid-template-columns: 48px max-content;
   align-items: baseline;
 }
-.project-search-location span {
+.project-result-context > div > span {
+  padding-right: 10px;
   color: var(--hon-muted);
-  font-size: calc(11px * var(--ui-font-scale));
+  text-align: right;
+  font:
+    11px 'JetBrains Mono',
+    monospace;
 }
-.project-search-results code {
-  overflow: hidden;
-  color: inherit;
+.project-result-context code {
+  white-space: pre;
   font-size: calc(12px * var(--editor-font-scale));
-  text-overflow: ellipsis;
+}
+.project-result-context .match-line {
+  color: var(--hon-text-bright);
+  background: color-mix(in srgb, var(--hon-green) 11%, transparent);
+}
+.project-results-empty {
+  height: 100%;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 8px;
+  padding: 24px;
+  color: var(--hon-muted);
+  text-align: center;
+  background: var(--hon-editor);
+}
+.project-results-empty p {
+  margin: 0;
+}
+
+/* Monaco's find controls share the generic `.button` and `.input` class names.
+   Reset those app-wide dimensions here so the native current-file bar stays compact. */
+.monaco-editor .find-widget {
+  max-width: calc(100% - 8px);
+  color: var(--hon-text-bright);
+  background: var(--hon-app);
+  border-color: var(--hon-border);
+  border-radius: 6px;
+}
+.monaco-editor .find-widget .monaco-inputbox {
+  color: var(--hon-text-bright);
+  background: var(--hon-terminal) !important;
+  border-color: var(--hon-border) !important;
+  border-radius: 4px;
+}
+.monaco-editor .find-widget .monaco-inputbox .input {
+  width: 100%;
+  height: auto;
+  min-height: 0;
+  padding: 2px 4px;
+  color: var(--hon-text-bright);
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  outline: 0;
+  box-shadow: none;
+}
+.monaco-editor .find-widget .button {
+  width: 22px;
+  min-width: 22px;
+  height: 22px;
+  min-height: 22px;
+  padding: 3px;
+  gap: 0;
+  color: var(--hon-text);
+  background: transparent;
+  border: 0;
+  border-radius: 4px;
+  transition: none;
+  box-sizing: border-box;
+}
+.monaco-editor .find-widget .button:active:not(:disabled) {
+  transform: none;
+}
+.monaco-editor .find-widget .button:not(.disabled):hover {
+  color: var(--hon-text-bright);
+  background: var(--hon-surface-hover) !important;
+}
+.monaco-editor .find-widget .button.toggle {
+  width: 18px;
+  height: -webkit-fill-available;
+}
+.monaco-editor .find-widget .matchesCount {
+  color: var(--hon-muted);
   white-space: nowrap;
 }
 

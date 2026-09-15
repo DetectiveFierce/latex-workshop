@@ -1,0 +1,20 @@
+{
+  "name": "mind-palace",
+  "interface": {
+    "displayName": "Mind Palace"
+  },
+  "plugins": [
+    {
+      "name": "latex-workshop",
+      "source": {
+        "source": "local",
+        "path": "./plugins/latex-workshop"
+      },
+      "policy": {
+        "installation": "INSTALLED_BY_DEFAULT",
+        "authentication": "ON_USE"
+      },
+      "category": "Productivity"
+    }
+  ]
+}

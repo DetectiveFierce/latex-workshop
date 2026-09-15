@@ -11,3 +11,10 @@ export function currentPdfSyncResult(
 ): PdfSyncResult | null {
   return value?.compilationId === compilationId ? value.result : null;
 }
+
+export function shouldRefreshPdfSync(
+  value: CompilationPdfSyncResult | null,
+  compilationId: string | null,
+): boolean {
+  return Boolean(value && compilationId && value.compilationId !== compilationId);
+}

@@ -79,6 +79,21 @@ export const checkpointManifestEntrySchema = z.union([
 ]);
 export const checkpointManifestSchema = z.array(checkpointManifestEntrySchema);
 export type CheckpointManifestEntry = z.infer<typeof checkpointManifestEntrySchema>;
+export function selectCheckpointMainFile<T extends { entryId: string; path: string }>(
+  manifest: readonly T[],
+  selectedEntryId: string | null,
+  allowFallback = false,
+): T | null {
+  const selected = selectedEntryId
+    ? manifest.find((entry) => entry.entryId === selectedEntryId)
+    : undefined;
+  if (selected) return selected;
+  if (!selectedEntryId && !allowFallback) return null;
+  const conventional = manifest.find((entry) => entry.path === 'main.tex');
+  if (conventional) return conventional;
+  if (!allowFallback) return null;
+  return manifest.find((entry) => entry.path.toLowerCase().endsWith('.tex')) ?? null;
+}
 export const compilerEngineSchema = z.enum(['pdflatex', 'xelatex', 'lualatex']);
 export type CompilerEngine = z.infer<typeof compilerEngineSchema>;
 

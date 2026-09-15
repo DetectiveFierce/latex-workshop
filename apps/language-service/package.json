@@ -10,14 +10,14 @@
     "start": "node dist/index.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint src",
-    "test": "vitest run"
+    "test": "vitest run --exclude 'dist/**'"
   },
   "dependencies": {
     "@latex-workshop/config": "workspace:*",
     "@latex-workshop/contracts": "workspace:*",
     "@latex-workshop/db": "workspace:*",
     "@latex-workshop/storage": "workspace:*",
-    "better-auth": "1.7.2",
+    "better-auth": "1.7.4",
     "drizzle-orm": "0.45.2",
     "fastify": "5.12.1",
     "ws": "8.21.3"

@@ -1,0 +1,4 @@
+interface:
+  display_name: 'LaTeX Workshop projects'
+  short_description: 'Edit and compile Mind Palace LaTeX projects'
+  default_prompt: 'Edit my Mind Palace LaTeX Workshop project.'

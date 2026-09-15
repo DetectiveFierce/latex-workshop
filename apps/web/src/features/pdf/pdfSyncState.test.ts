@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import type { PdfSyncResult } from '@latex-workshop/contracts';
-import { currentPdfSyncResult, type CompilationPdfSyncResult } from './pdfSyncState';
+import {
+  currentPdfSyncResult,
+  shouldRefreshPdfSync,
+  type CompilationPdfSyncResult,
+} from './pdfSyncState';
 
 const result: PdfSyncResult = {
   point: { page: 1, x: 10, y: 20 },
@@ -28,5 +32,11 @@ describe('currentPdfSyncResult', () => {
 
   it('does not expose a result without an active compilation', () => {
     expect(currentPdfSyncResult(sync, null)).toBeNull();
+  });
+
+  it('requests a fresh mapping when the displayed PDF changes', () => {
+    expect(shouldRefreshPdfSync(sync, 'compile-1')).toBe(false);
+    expect(shouldRefreshPdfSync(sync, 'compile-2')).toBe(true);
+    expect(shouldRefreshPdfSync(null, 'compile-2')).toBe(false);
   });
 });

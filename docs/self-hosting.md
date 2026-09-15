@@ -111,6 +111,12 @@ loopback or tailnet-only address; use a deliberately exposed HTTPS hostname or a
 tunnel. DCR materially expands the registration surface and should remain disabled unless the
 specific client requires it.
 
+For ChatGPT Secure MCP Tunnel, the application itself remains tailnet-only. Set
+`AGENT_MCP_RESOURCE_URL` to the OpenAI gateway resource printed by
+`infra/openai-mcp-tunnel/configure.sh`, and keep the Tailscale `/api/mcp` URL in the tunnel service's
+`PRIVATE_MCP_URL`. OAuth requires the configured resource and ChatGPT's `resource` parameter to
+match exactly.
+
 Compiled-page image inspection uses Ghostscript inside the same isolated worker-side image selected
 by `COMPILE_IMAGE`. Custom TeX images must therefore provide a `gs` executable in addition to the
 supported LaTeX engines. The bundled `infra/texlive` image already includes it.

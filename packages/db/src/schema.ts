@@ -49,7 +49,7 @@ export const accounts = pgTable(
   'accounts',
   {
     id: text('id').primaryKey(),
-    issuer: text('issuer').notNull(),
+    issuer: text('issuer'),
     accountId: text('account_id').notNull(),
     providerId: text('provider_id').notNull(),
     userId: text('user_id')
@@ -117,7 +117,7 @@ export const oauthClients = pgTable(
     backchannelLogoutSessionRequired: boolean('backchannel_logout_session_required'),
     tokenEndpointAuthMethod: text('token_endpoint_auth_method'),
     applicationType: text('application_type'),
-    clientJwks: text('jwks'),
+    jwks: text('jwks'),
     jwksUri: text('jwks_uri'),
     grantTypes: text('grant_types').array(),
     responseTypes: text('response_types').array(),

@@ -1,0 +1,64 @@
+{
+  "cases": [
+    {
+      "name": "direct edit",
+      "prompt": "Edit the LaTeX Workshop project Research Notes and add the missing citation.",
+      "expect": "Use list_projects, complete a compiled proposal, and return reviewUrl."
+    },
+    {
+      "name": "indirect Mind Palace edit",
+      "prompt": "Fix the bibliography in my Mind Palace paper.",
+      "expect": "Use list_projects and ask which project only if the result is ambiguous."
+    },
+    {
+      "name": "follow-up edit",
+      "prompt": "Now tighten the conclusion in that same project.",
+      "expect": "Reuse the previously resolved project, reread relevant accepted source, and create a new proposal revision."
+    },
+    {
+      "name": "missing grant",
+      "prompt": "Edit my LaTeX Workshop project Private Draft.",
+      "expect": "If Private Draft is absent from list_projects, return manageAccessUrl instead of claiming a filesystem limitation."
+    },
+    {
+      "name": "ambiguous grant",
+      "prompt": "Fix the references in my Research project.",
+      "expect": "If list_projects contains multiple plausible Research matches, show the matching names and ask the user to choose; never guess an id."
+    },
+    {
+      "name": "organized creation",
+      "prompt": "Create a new LaTeX Workshop project for my MA 711 homework.",
+      "expect": "Inspect folders, tags, and related project assignments from list_projects; use appropriate existing folderId and tagIds when evidence is strong, otherwise avoid speculative placement."
+    },
+    {
+      "name": "explicit project move",
+      "prompt": "Move my Research Notes project into the Papers folder and assign the Draft tag.",
+      "expect": "Resolve project, folder, and tag ids with list_projects, use organize_library action=move_project with projectId and destination folderId, set its complete intended tags, then refresh list_projects to verify folderId."
+    },
+    {
+      "name": "move project to root",
+      "prompt": "Move my Research Notes project out of Papers and back to the Library root.",
+      "expect": "Resolve the project with list_projects, call organize_library action=move_project with its projectId and folderId=null, then refresh list_projects and verify folderId is null. Do not use propose_structure."
+    },
+    {
+      "name": "folder management",
+      "prompt": "Create a Spring 2027 folder under Courses and rename Courses to Coursework.",
+      "expect": "Use list_projects and organize_library; use the returned id for the created folder and refresh organization after mutations."
+    },
+    {
+      "name": "destructive organization",
+      "prompt": "Delete the Archive folder and the Obsolete tag.",
+      "expect": "Explain that the folder subtree and contained projects move to Trash and tag assignments are removed before calling organize_library; do not bypass ungranted-project protection."
+    },
+    {
+      "name": "local tex file",
+      "prompt": "Edit ./paper.tex in this local repository.",
+      "expect": "Do not activate the Mind Palace workflow unless the user identifies it as a LaTeX Workshop project."
+    },
+    {
+      "name": "VS Code extension",
+      "prompt": "How do I configure the VS Code LaTeX Workshop extension?",
+      "expect": "Do not activate the Mind Palace workflow."
+    }
+  ]
+}

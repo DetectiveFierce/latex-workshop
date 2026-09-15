@@ -38,4 +38,20 @@ describe('oauthAuthorizationQuery', () => {
   it('rejects ordinary authentication page queries', () => {
     expect(oauthAuthorizationQuery('?next=%2Fprojects')).toBeNull();
   });
+
+  it('restores repeated signed parameter names serialized as a router array', () => {
+    const routerQuery = new URLSearchParams({
+      client_id: 'https://chatgpt.com/oauth/callback/client.json',
+      scope: 'projects:read proposals:write',
+      ba_iat: '1789416919140',
+      ba_param: JSON.stringify(['ba_iat', 'ba_param', 'client_id', 'scope']),
+      sig: 'signed-value',
+    });
+
+    const normalized = oauthAuthorizationQuery(`?${routerQuery.toString()}`);
+    const params = new URLSearchParams(normalized ?? '');
+    expect(params.getAll('ba_param')).toEqual(['ba_iat', 'ba_param', 'client_id', 'scope']);
+    expect(params.get('client_id')).toBe('https://chatgpt.com/oauth/callback/client.json');
+    expect(params.get('sig')).toBe('signed-value');
+  });
 });

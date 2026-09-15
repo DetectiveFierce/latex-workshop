@@ -87,6 +87,26 @@ describe('loadConfig', () => {
     ).toBe(true);
   });
 
+  it('supports a private browser alias alongside a tunneled ChatGPT MCP resource', () => {
+    const config = loadConfig({
+      ...base,
+      WEB_ORIGIN: 'https://mind-palace.example-tailnet.ts.net',
+      API_ORIGIN: 'https://mind-palace.example-tailnet.ts.net/latex-workshop',
+      ADDITIONAL_TRUSTED_ORIGINS: 'https://mind-palace',
+      AGENT_MCP_ENABLED: 'true',
+      AGENT_MCP_RESOURCE_URL:
+        'https://tunnel-service.gateway.unified-0.internal.api.openai.org/v1/mcp/tunnel_example',
+    });
+
+    expect(trustedWebOrigins(config)).toEqual([
+      'https://mind-palace.example-tailnet.ts.net',
+      'https://mind-palace',
+    ]);
+    expect(config.AGENT_MCP_RESOURCE_URL).toContain(
+      'tunnel-service.gateway.unified-0.internal.api.openai.org',
+    );
+  });
+
   it.each([
     ['API_PORT', '0'],
     ['LSP_PORT', '65536'],

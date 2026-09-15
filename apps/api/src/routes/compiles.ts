@@ -56,6 +56,10 @@ export async function registerCompileRoutes(app: FastifyInstance, context: AppCo
       .where(and(eq(entries.id, project.mainFileId), eq(entries.projectId, projectId)))
       .limit(1);
     if (!main) throw badRequest('The selected main file no longer exists');
+    if (main.size === 0)
+      throw badRequest(
+        'The accepted main file is empty. Compile the active proposal or accept its changes first.',
+      );
     const input = compileRequestSchema.parse(request.body ?? {});
 
     const [userActive] = await context.db

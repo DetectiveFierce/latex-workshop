@@ -198,7 +198,10 @@ services:
       timeout: 4s
       retries: 12
     stop_grace_period: 30s
-    networks: [backend]
+    # OAuth CIMD requires the authorization server to fetch the client's HTTPS
+    # metadata document. This dedicated bridge provides outbound access without
+    # publishing the API or placing any data service on an Internet-routable port.
+    networks: [backend, oauth-egress]
     logging: *default-logging
 
   language-service:
@@ -322,6 +325,8 @@ networks:
   backend:
     name: latex-workshop-backend
     internal: true
+  oauth-egress:
+    name: latex-workshop-oauth-egress
   edge:
     name: mind-palace-edge
     external: true

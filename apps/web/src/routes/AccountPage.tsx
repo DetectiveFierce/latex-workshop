@@ -5,6 +5,7 @@ import {
   ArrowLeft,
   Bot,
   Copy,
+  ExternalLink,
   Keyboard,
   LogOut,
   RotateCcw,
@@ -300,12 +301,27 @@ function AgentSetupCard() {
   return (
     <div className="agent-setup-card">
       <div>
-        <strong>Connect an agent or another device</strong>
+        <strong>Use LaTeX Workshop from ChatGPT or another agent</strong>
         <p className="hint">
-          Add this remote HTTP MCP server in Codex, Pi, or Grok. Each device authorizes once; tools
-          and guidance update from this server automatically.
+          In ChatGPT, install your workspace's LaTeX Workshop plugin and ask for the project by
+          name. The first request opens a one-time authorization where you choose which projects it
+          can access.
         </p>
       </div>
+      <div className="agent-chatgpt-row">
+        <a
+          className="button button-secondary"
+          href="https://chatgpt.com/plugins"
+          target="_blank"
+          rel="noreferrer"
+        >
+          <ExternalLink size={15} aria-hidden="true" /> Open ChatGPT Plugins
+        </a>
+        <span>Already installed? Start a new chat and say “Edit my LaTeX Workshop project…”</span>
+      </div>
+      <p className="hint">
+        For Codex, Pi, Grok, or another MCP client, add this remote HTTP server directly:
+      </p>
       <div className="agent-endpoint-row">
         <code>{endpoint}</code>
         <Button
@@ -324,8 +340,8 @@ function AgentSetupCard() {
         </Button>
       </div>
       <small>
-        Credentials stay on that device. Revoke a device at any time below without changing this URL
-        or the server-managed agent instructions.
+        Each ChatGPT account or device authorizes separately. Revoke access below at any time
+        without changing this URL or the server-managed guidance.
       </small>
     </div>
   );

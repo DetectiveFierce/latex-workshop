@@ -16,6 +16,8 @@ import { serializeAuthProxyBody } from './lib/auth-proxy-body.js';
 import { codexCompatibleAuthorizationMetadata } from './lib/oauth-metadata-compat.js';
 import { startMaintenance } from './lib/maintenance.js';
 import {
+  canonicalWellKnownRequestUrl,
+  pathAwareProtectedResourceMetadataPath,
   publicAuthBasePath,
   publicRequestUrl,
   publicWellKnownUrl,
@@ -99,7 +101,10 @@ export async function buildServer() {
     headers.delete('content-length');
     const incomingUrl = request.raw.url ?? '/';
     const publicUrl = incomingUrl.startsWith('/.well-known/')
-      ? publicWellKnownUrl(config.API_ORIGIN, incomingUrl)
+      ? publicWellKnownUrl(
+          config.API_ORIGIN,
+          canonicalWellKnownRequestUrl(config.API_ORIGIN, incomingUrl),
+        )
       : publicRequestUrl(config.API_ORIGIN, incomingUrl);
     const body =
       request.method !== 'GET' && request.method !== 'HEAD'
@@ -126,13 +131,10 @@ export async function buildServer() {
     handler: proxyAuth,
   });
   if (config.AGENT_MCP_ENABLED) {
-    const resourcePath = new URL(
-      config.AGENT_MCP_RESOURCE_URL ?? publicRequestUrl(config.API_ORIGIN, '/api/mcp').href,
-    ).pathname.replace(/\/+$/, '');
     for (const path of new Set([
       '/.well-known/oauth-protected-resource',
       '/.well-known/oauth-protected-resource/api/mcp',
-      `/.well-known/oauth-protected-resource${resourcePath}`,
+      pathAwareProtectedResourceMetadataPath(config.API_ORIGIN),
       '/.well-known/oauth-authorization-server/api/auth',
       `/.well-known/oauth-authorization-server${publicAuthBasePath(config.API_ORIGIN)}`,
       '/api/auth/.well-known/oauth-authorization-server',

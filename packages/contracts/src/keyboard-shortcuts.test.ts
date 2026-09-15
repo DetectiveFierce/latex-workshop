@@ -35,8 +35,11 @@ describe('keyboard shortcuts', () => {
   });
 
   it('uses platform-specific defaults', () => {
-    expect(resolveShortcutBindings({}, true)['workspace.projectSearch']).toBe('Meta+Shift+KeyF');
-    expect(resolveShortcutBindings({}, true)['editor.wordLeft']).toBe('Alt+ArrowLeft');
+    const mac = resolveShortcutBindings({}, true);
+    expect(mac['workspace.projectSearch']).toBe('Meta+Shift+KeyF');
+    expect(mac['editor.wordLeft']).toBe('Alt+ArrowLeft');
+    expect(mac['editor.paste']).toBe('Meta+KeyV');
+    expect(mac['editor.selectAll']).toBe('Meta+KeyA');
     expect(resolveShortcutBindings({}, false)['editor.wordLeft']).toBe('Ctrl+ArrowLeft');
   });
 

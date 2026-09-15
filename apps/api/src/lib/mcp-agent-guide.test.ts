@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import {
   editLatexWorkshopProjectPrompt,
@@ -13,8 +14,15 @@ describe('Mind Palace MCP agent guidance', () => {
     expect(mindPalaceMcpServerName).toBe('Mind Palace LaTeX Workshop');
     expect(mindPalaceMcpInstructions).toContain('Mind Palace site');
     expect(mindPalaceMcpInstructions).toContain('not the VS Code extension');
+    expect(mindPalaceMcpInstructions).toContain('Do not claim filesystem access is required');
+    expect(mindPalaceMcpInstructions).toContain('manageAccessUrl');
+    expect(mindPalaceMcpInstructions).toContain('reviewUrl');
     expect(mindPalaceMcpInstructions).toContain('create_project');
     expect(mindPalaceMcpInstructions).toContain('rename_project');
+    expect(mindPalaceMcpInstructions).toContain('organize_library');
+    expect(mindPalaceMcpInstructions).toContain('folder/tag conventions');
+    expect(mindPalaceMcpInstructions).toContain('action move_project');
+    expect(mindPalaceMcpInstructions).toContain('folderId=null');
     expect(projectScopeRule).toContain('top-level Library item');
     expect(projectScopeRule).toContain('MUST call create_project');
     expect(projectScopeRule).toContain('Do not use start_proposal');
@@ -59,5 +67,34 @@ describe('Mind Palace MCP agent guidance', () => {
     expect(prompt).toContain('Mind Palace LaTeX Workshop project named "Research Notes"');
     expect(prompt).toContain('Add the missing citation to the introduction.');
     expect(prompt).toContain('finish the proposal for owner review');
+    expect(prompt).toContain('reviewUrl');
+    expect(prompt).toContain('do not claim filesystem access is required');
+  });
+
+  it('keeps the workspace skill aligned with the server-managed workflow', () => {
+    const skill = readFileSync(
+      new URL(
+        '../../../../plugins/latex-workshop/skills/latex-workshop-projects/SKILL.md',
+        import.meta.url,
+      ),
+      'utf8',
+    );
+    for (const term of [
+      'LaTeX Workshop',
+      'Mind Palace',
+      'list_projects',
+      'get_project_tree',
+      'read_text_file',
+      'start_proposal',
+      'finish_proposal',
+      'organize_library',
+      'organizationComplete',
+      'action="move_project"',
+      'folderId=null',
+      'manageAccessUrl',
+      'reviewUrl',
+      'filesystem limitation',
+    ])
+      expect(skill, `workspace skill should contain ${term}`).toContain(term);
   });
 });

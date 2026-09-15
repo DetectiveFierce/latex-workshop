@@ -1,0 +1,47 @@
+name: latex-workshop-openai-tunnel
+
+services:
+  tunnel-client:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: latex-workshop-openai-tunnel:0.0.14
+    command:
+      - run
+      - --control-plane.tunnel-id=${OPENAI_TUNNEL_ID:?set OPENAI_TUNNEL_ID}
+      - --control-plane.api-key=file:/run/secrets/control_plane_api_key
+      - --control-plane.max-inflight=10
+      - --ca-bundle=/run/certs/caddy-root.crt
+      - --health.listen-addr=127.0.0.1:18080
+      - --mcp.server-url=url=${PRIVATE_MCP_URL:?set PRIVATE_MCP_URL},channel=main
+      - --mcp.startup-wait-timeout=60s
+      - --log.format=json
+      - --log.level=info
+    restart: unless-stopped
+    user: ${TUNNEL_RUNTIME_UID:-1000}:${TUNNEL_RUNTIME_GID:-1000}
+    network_mode: host
+    environment:
+      SSL_CERT_FILE: /run/certs/caddy-root.crt
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 64
+    mem_limit: 256m
+    cpus: 0.50
+    secrets:
+      - control_plane_api_key
+    volumes:
+      - ${CADDY_ROOT_CA_PATH:?set CADDY_ROOT_CA_PATH}:/run/certs/caddy-root.crt:ro
+    healthcheck:
+      test: [CMD, curl, -fsS, http://127.0.0.1:18080/readyz]
+      interval: 15s
+      timeout: 5s
+      retries: 8
+      start_period: 20s
+
+secrets:
+  control_plane_api_key:
+    file: ./secrets/control-plane-api-key

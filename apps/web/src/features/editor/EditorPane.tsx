@@ -175,6 +175,8 @@ export function EditorPane({
   const onChangeRef = useRef(onChange);
   const onSaveStateRef = useRef(onSaveState);
   const onSourceLocateRef = useRef(onSourceLocate);
+  const onWorkspaceShortcutRef = useRef(onWorkspaceShortcut);
+  const onHistoryActionRef = useRef(onHistoryAction);
   const proposalModelRef = useRef<ProposalFileModel | null>(proposalModel ?? null);
   const onProposalEditRef = useRef(onProposalEdit);
   const onSelectHunkRef = useRef(onSelectHunk);
@@ -189,6 +191,8 @@ export function EditorPane({
   onChangeRef.current = onChange;
   onSaveStateRef.current = onSaveState;
   onSourceLocateRef.current = onSourceLocate;
+  onWorkspaceShortcutRef.current = onWorkspaceShortcut;
+  onHistoryActionRef.current = onHistoryAction;
   onProposalEditRef.current = onProposalEdit;
   onSelectHunkRef.current = onSelectHunk;
   onDecideHunkRef.current = onDecideHunk;
@@ -618,16 +622,27 @@ export function EditorPane({
     const disposables = shortcutRegistry.flatMap((definition) => {
       const binding = shortcuts[definition.id];
       const keybinding = binding ? monacoKeybinding(Monaco, binding) : null;
-      if (!keybinding) return [];
+      if (!binding || !keybinding) return [];
+      if (
+        usesNativeEditingShortcut(
+          definition.id,
+          binding,
+          definition.defaultBinding,
+          definition.macDefaultBinding,
+          keymap,
+        )
+      )
+        return [];
       return [
         editor.addAction({
           id: `latex-workshop.${definition.id}`,
           label: definition.label,
           keybindings: [keybinding],
+          keybindingContext: 'editorTextFocus',
           run: () => {
-            if (definition.scope === 'workspace') onWorkspaceShortcut(definition.id);
+            if (definition.scope === 'workspace') onWorkspaceShortcutRef.current(definition.id);
             else if (definition.id === 'editor.undo' || definition.id === 'editor.redo')
-              onHistoryAction?.(definition.id === 'editor.undo' ? 'undo' : 'redo');
+              onHistoryActionRef.current?.(definition.id === 'editor.undo' ? 'undo' : 'redo');
             else if (definition.command) {
               const boundary = ['Line editing', 'General editing'].includes(definition.category);
               if (boundary) editor.pushUndoStop();
@@ -642,7 +657,29 @@ export function EditorPane({
       ];
     });
     return () => disposables.forEach((disposable) => disposable.dispose());
-  }, [editorReady, keymap, onHistoryAction, onWorkspaceShortcut, shortcuts]);
+  }, [editorReady, keymap, shortcuts]);
+
+  useEffect(() => {
+    if (!editorReady) return;
+    const keepFindInputEditingLocal = (event: KeyboardEvent) => {
+      if (!event.ctrlKey && !event.metaKey) return;
+      if (!nativeInputEditingKeys.has(event.key.toLocaleLowerCase())) return;
+      const target = event.target;
+      const editorNode = editorRef.current?.getDomNode();
+      if (
+        !editorNode ||
+        !(target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) ||
+        !editorNode.contains(target) ||
+        !target.closest('.find-widget')
+      )
+        return;
+      // Monaco's core Select All command has no text-focus precondition. Keep native
+      // input editing as the uncancelled browser default without letting it bubble.
+      event.stopImmediatePropagation();
+    };
+    window.addEventListener('keydown', keepFindInputEditingLocal, true);
+    return () => window.removeEventListener('keydown', keepFindInputEditingLocal, true);
+  }, [editorReady]);
 
   useEffect(() => {
     if (!editorReady) return;
@@ -755,6 +792,20 @@ export function EditorPane({
       </span>
     </div>
   );
+}
+
+const nativeEditingActions = new Set<ShortcutActionId>(['editor.paste']);
+const nativeInputEditingKeys = new Set(['a', 'c', 'v', 'x', 'y', 'z']);
+
+function usesNativeEditingShortcut(
+  action: ShortcutActionId,
+  binding: string,
+  defaultBinding: string | null,
+  macDefaultBinding: string | null | undefined,
+  keymap: 'linux' | 'macos',
+) {
+  if (!nativeEditingActions.has(action)) return false;
+  return binding === (keymap === 'macos' ? (macDefaultBinding ?? defaultBinding) : defaultBinding);
 }
 
 function runMonacoCommand(

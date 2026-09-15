@@ -6,6 +6,58 @@ export type AutoCompileTarget =
 
 export type AutoCompileDecision = 'compile' | 'covered' | 'wait';
 
+export function effectivePreviewTarget(input: {
+  preferredTarget: 'accepted' | 'proposal';
+  acceptedSourceAvailable: boolean;
+  proposalId: string | null;
+}): 'accepted' | 'proposal' {
+  if (!input.proposalId) return 'accepted';
+  if (!input.acceptedSourceAvailable) return 'proposal';
+  return input.preferredTarget;
+}
+
+export function latestCompileForPreview(
+  jobs: readonly CompileJob[] | undefined,
+  target: 'accepted' | 'proposal',
+  proposalId: string | null,
+  proposalRevision?: number | null,
+): CompileJob | null {
+  return (
+    jobs?.find((job) =>
+      target === 'accepted'
+        ? job.target === 'accepted'
+        : job.target === 'proposal' &&
+          job.proposalId === proposalId &&
+          (proposalRevision === undefined || job.proposalRevision === proposalRevision),
+    ) ?? null
+  );
+}
+
+export function successfulCompileForPreview(input: {
+  jobs: readonly CompileJob[] | undefined;
+  target: 'accepted' | 'proposal';
+  proposalId: string | null;
+  proposalRevision?: number | null;
+  compileJobId?: string | null;
+  acceptedFallback?: CompileJob | null;
+}): CompileJob | null {
+  const matching = input.compileJobId
+    ? (input.jobs?.find((job) => job.id === input.compileJobId) ?? null)
+    : latestCompileForPreview(input.jobs, input.target, input.proposalId, input.proposalRevision);
+  if (
+    matching &&
+    (matching.target !== input.target ||
+      (input.target === 'proposal' &&
+        (matching.proposalId !== input.proposalId ||
+          matching.proposalRevision !== input.proposalRevision)))
+  )
+    return null;
+  if (matching?.status === 'succeeded') return matching;
+  if (input.target === 'accepted' && input.acceptedFallback?.status === 'succeeded')
+    return input.acceptedFallback;
+  return null;
+}
+
 export function selectAutoCompileTarget(input: {
   preferredTarget: 'accepted' | 'proposal';
   acceptedRevision: number;

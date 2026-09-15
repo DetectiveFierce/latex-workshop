@@ -62,16 +62,32 @@ import {
 } from '../features/editor/EditorPane';
 import type { TexLabStatus } from '../features/editor/lspClient';
 import { PdfViewer } from '../features/pdf/PdfViewer';
-import { currentPdfSyncResult, type CompilationPdfSyncResult } from '../features/pdf/pdfSyncState';
+import {
+  currentPdfSyncResult,
+  shouldRefreshPdfSync,
+  type CompilationPdfSyncResult,
+} from '../features/pdf/pdfSyncState';
 import {
   autoCompileTargetKey,
   decideAutoCompile,
+  effectivePreviewTarget,
+  latestCompileForPreview,
   selectAutoCompileTarget,
+  successfulCompileForPreview,
   type AutoCompileTarget,
 } from '../features/compile/autoCompileState';
 import { ProposalEditorDock } from '../features/agent-proposals/ProposalEditorDock';
-import { ProjectSearchDialog } from '../features/search/ProjectSearchDialog';
-import type { ProjectSearchResult, ProjectSearchSource } from '../features/search/projectSearch';
+import { ProjectSearchBar, ProjectSearchResults } from '../features/search/ProjectSearchPanel';
+import {
+  DEFAULT_PROJECT_SEARCH_OPTIONS,
+  MAX_PROJECT_SEARCH_RESULTS,
+  projectSearchError,
+  replaceProjectSourceMatches,
+  searchProjectSources,
+  type ProjectSearchOptions,
+  type ProjectSearchResult,
+  type ProjectSearchSource,
+} from '../features/search/projectSearch';
 import { useAgentProposal } from '../features/agent-proposals/useAgentProposal';
 import { canDiscardDraftChange } from '../features/agent-proposals/proposalActiveState';
 import {
@@ -111,6 +127,7 @@ type HistoryOutboxMutation = {
 };
 const historyCommitsEnabled = import.meta.env.VITE_EDIT_HISTORY_COMMITS !== 'false';
 const AUTO_COMPILE_IDLE_MS = 2_500;
+const PROJECT_SEARCH_TAB_ID = 'workspace:project-search-results';
 
 export default function WorkspacePage() {
   const { projectId } = useParams({ from: '/projects/$projectId' });
@@ -181,8 +198,15 @@ export default function WorkspacePage() {
   const [paletteQuery, setPaletteQuery] = useState('');
   const [projectSearchOpen, setProjectSearchOpen] = useState(false);
   const [projectSearchQuery, setProjectSearchQuery] = useState('');
+  const [projectSearchReplacement, setProjectSearchReplacement] = useState('');
+  const [projectReplaceOpen, setProjectReplaceOpen] = useState(false);
+  const [projectSearchOptions, setProjectSearchOptions] = useState<ProjectSearchOptions>(
+    DEFAULT_PROJECT_SEARCH_OPTIONS,
+  );
+  const [projectSearchActive, setProjectSearchActive] = useState(0);
   const [projectSearchSources, setProjectSearchSources] = useState<ProjectSearchSource[]>([]);
   const [projectSearchLoading, setProjectSearchLoading] = useState(false);
+  const [projectSearchReplacing, setProjectSearchReplacing] = useState(false);
   const [projectSearchFailedFiles, setProjectSearchFailedFiles] = useState(0);
   const [treeWidth, setTreeWidth] = useState(initialPreferences.current.treeWidth);
   const [editorWidth, setEditorWidth] = useState(initialPreferences.current.editorWidth);
@@ -212,6 +236,7 @@ export default function WorkspacePage() {
   const autoCompileRequestPending = useRef(false);
   const manualCompile = useRef(false);
   const syncRequestRef = useRef<{ id: number; controller: AbortController } | null>(null);
+  const lastForwardSelectionRef = useRef<SourceSelection | null>(null);
   const editHistoriesRef = useRef<Record<string, EditHistoryResponse>>({});
 
   useEffect(() => {
@@ -236,6 +261,20 @@ export default function WorkspacePage() {
   const autoCompileEnabled = autoCompileOverride ?? payload?.project.autoCompile ?? false;
   const entries = payload?.entries ?? [];
   const paths = useMemo(() => buildPaths(entries), [entries]);
+  const projectSearchResults = useMemo(
+    () =>
+      searchProjectSources(
+        projectSearchSources,
+        projectSearchQuery,
+        MAX_PROJECT_SEARCH_RESULTS,
+        projectSearchOptions,
+      ),
+    [projectSearchOptions, projectSearchQuery, projectSearchSources],
+  );
+  const projectSearchValidationError = useMemo(
+    () => projectSearchError(projectSearchQuery, projectSearchOptions),
+    [projectSearchOptions, projectSearchQuery],
+  );
   const selected = entries.find((entry) => entry.id === selectedId) ?? null;
   const selectedPath = selected ? (paths.get(selected.id) ?? null) : proposalOpenPath;
   const selectedTextContent =
@@ -299,6 +338,15 @@ export default function WorkspacePage() {
     },
   });
   const activeProposal = agentProposal.proposal;
+  const acceptedMainFile = entries.find((entry) => entry.id === payload?.project.mainFileId);
+  const acceptedSourceAvailable = Boolean(
+    acceptedMainFile?.kind === 'file' && acceptedMainFile.size > 0,
+  );
+  const compilePreviewTarget = effectivePreviewTarget({
+    preferredTarget: previewTarget,
+    acceptedSourceAvailable,
+    proposalId: activeProposal?.id ?? null,
+  });
   const acceptedCompile =
     compileQuery.data?.jobs.find(
       (job) => job.status === 'succeeded' && job.target === 'accepted',
@@ -307,26 +355,37 @@ export default function WorkspacePage() {
       ? payload.latestCompile
       : null);
   const proposalCompile = activeProposal
-    ? (compileQuery.data?.jobs.find(
-        (job) =>
-          job.status === 'succeeded' &&
-          job.target === 'proposal' &&
-          job.proposalId === activeProposal.id,
-      ) ?? null)
+    ? successfulCompileForPreview({
+        jobs: compileQuery.data?.jobs,
+        target: 'proposal',
+        proposalId: activeProposal.id,
+        proposalRevision: activeProposal.revision,
+        compileJobId: activeProposal.compileJobId,
+      })
     : null;
-  const latestProposalCompile = activeProposal
-    ? (compileQuery.data?.jobs.find(
-        (job) => job.target === 'proposal' && job.proposalId === activeProposal.id,
-      ) ?? null)
-    : null;
+  const latestProposalCompile = latestCompileForPreview(
+    compileQuery.data?.jobs,
+    'proposal',
+    activeProposal?.id ?? null,
+    activeProposal?.revision,
+  );
+  const latestAcceptedCompile =
+    latestCompileForPreview(compileQuery.data?.jobs, 'accepted', null) ??
+    (payload?.latestCompile?.target === 'accepted' ? payload.latestCompile : null);
   const successfulCompile =
-    previewTarget === 'proposal' && activeProposal
-      ? (proposalCompile ?? acceptedCompile)
-      : acceptedCompile;
+    compilePreviewTarget === 'proposal'
+      ? proposalCompile
+      : successfulCompileForPreview({
+          jobs: compileQuery.data?.jobs,
+          target: 'accepted',
+          proposalId: null,
+          acceptedFallback: acceptedCompile,
+        });
   const activeCompile =
     compileQuery.data?.jobs.find((job) => job.status === 'queued' || job.status === 'running') ??
     null;
-  const latestCompile = compileQuery.data?.jobs[0] ?? payload?.latestCompile ?? null;
+  const displayedCompile =
+    compilePreviewTarget === 'proposal' ? latestProposalCompile : latestAcceptedCompile;
 
   useEffect(() => {
     if (!payload) return;
@@ -365,10 +424,32 @@ export default function WorkspacePage() {
     const validFiles = new Set(
       entries.filter((entry) => entry.kind === 'file').map(({ id }) => id),
     );
+    if (projectSearchOpen) validFiles.add(PROJECT_SEARCH_TAB_ID);
     for (const file of agentProposal.virtualFiles) validFiles.add(`proposal:${file.changeId}`);
     setOpenTabs((tabs) => tabs.filter((id) => validFiles.has(id)));
     if (selectedId && !validFiles.has(selectedId)) setSelectedId(null);
-  }, [agentProposal.virtualFiles, entries, payload, selectedId]);
+  }, [agentProposal.virtualFiles, entries, payload, projectSearchOpen, selectedId]);
+
+  useEffect(() => {
+    setProjectSearchActive((value) =>
+      projectSearchResults.length ? Math.min(value, projectSearchResults.length - 1) : 0,
+    );
+  }, [projectSearchQuery, projectSearchOptions, projectSearchResults.length]);
+
+  useEffect(() => {
+    if (!projectSearchOpen) return;
+    setProjectSearchSources((sources) => {
+      let changed = false;
+      const next = sources.map((source) => {
+        const current = contents[source.entryId];
+        if (!current || (current.content === source.content && current.version === source.version))
+          return source;
+        changed = true;
+        return { ...source, content: current.content, version: current.version };
+      });
+      return changed ? next : sources;
+    });
+  }, [contents, projectSearchOpen]);
 
   useEffect(() => {
     localStorage.setItem(
@@ -485,6 +566,11 @@ export default function WorkspacePage() {
     if (!openTabs.length) return;
     const current = openTabs.indexOf(selectedId ?? '');
     const nextId = openTabs[(current + direction + openTabs.length) % openTabs.length];
+    if (nextId === PROJECT_SEARCH_TAB_ID) {
+      setSelectedId(PROJECT_SEARCH_TAB_ID);
+      setMobilePanel('editor');
+      return;
+    }
     const next = entries.find((entry) => entry.id === nextId);
     if (next) void openEntry(next);
     else {
@@ -496,12 +582,17 @@ export default function WorkspacePage() {
   }
 
   function closeTab(id: string) {
+    if (id === PROJECT_SEARCH_TAB_ID) {
+      setProjectSearchOpen(false);
+      projectSearchRequestRef.current += 1;
+    }
     setOpenTabs((tabs) => {
       const index = tabs.indexOf(id);
       const nextTabs = tabs.filter((tab) => tab !== id);
       if (selectedId === id) {
         const adjacent = nextTabs[Math.min(Math.max(index, 0), nextTabs.length - 1)] ?? null;
         setSelectedId(adjacent);
+        if (adjacent === PROJECT_SEARCH_TAB_ID) return nextTabs;
         const entry = entries.find((item) => item.id === adjacent);
         if (entry) void openEntry(entry);
         else {
@@ -628,9 +719,18 @@ export default function WorkspacePage() {
   async function openProjectSearch() {
     const requestId = ++projectSearchRequestRef.current;
     setProjectSearchQuery('');
+    setProjectSearchReplacement('');
+    setProjectReplaceOpen(false);
+    setProjectSearchOptions(DEFAULT_PROJECT_SEARCH_OPTIONS);
+    setProjectSearchActive(0);
     setProjectSearchOpen(true);
     setProjectSearchLoading(true);
     setProjectSearchFailedFiles(0);
+    setSelectedId(PROJECT_SEARCH_TAB_ID);
+    setMobilePanel('editor');
+    setOpenTabs((tabs) =>
+      tabs.includes(PROJECT_SEARCH_TAB_ID) ? tabs : [...tabs, PROJECT_SEARCH_TAB_ID],
+    );
     const sourceEntries = entries.filter(
       (entry) => entry.kind === 'file' && isTextFile(entry.name, entry.mimeType),
     );
@@ -652,6 +752,7 @@ export default function WorkspacePage() {
             entryId: entry.id,
             path: paths.get(entry.id) ?? entry.name,
             content: data.content,
+            version: data.version,
           });
         } catch {
           failed += 1;
@@ -674,7 +775,6 @@ export default function WorkspacePage() {
   async function openProjectSearchResult(result: ProjectSearchResult) {
     const entry = entries.find((item) => item.id === result.entryId);
     if (!entry) return;
-    setProjectSearchOpen(false);
     setMobilePanel('editor');
     await openEntry(entry);
     setNavigation((current) => ({
@@ -689,6 +789,87 @@ export default function WorkspacePage() {
         },
       ],
     }));
+  }
+
+  async function replaceProjectResults(results: ProjectSearchResult[], replaceAll = false) {
+    if (!results.length || projectSearchReplacing) return;
+    setProjectSearchReplacing(true);
+    const affectedIds = new Set(results.map((result) => result.entryId));
+    const updated = new Map<string, ProjectSearchSource>();
+    let replaced = 0;
+    try {
+      await saveCurrentRef.current?.();
+      for (const source of projectSearchSources) {
+        if (!affectedIds.has(source.entryId)) continue;
+        const fresh = await api<FileContent & { hash: string }>(
+          `/api/v1/projects/${projectId}/entries/${source.entryId}/content`,
+        );
+        const freshSource = { ...source, content: fresh.content, version: fresh.version };
+        const freshMatches = searchProjectSources(
+          [freshSource],
+          projectSearchQuery,
+          MAX_PROJECT_SEARCH_RESULTS,
+          projectSearchOptions,
+        );
+        const expectedMatches = results.filter((result) => result.entryId === source.entryId);
+        const expectedKeys = new Set(
+          (replaceAll ? expectedMatches : expectedMatches.slice(0, 1)).map(
+            (match) => `${match.startOffset}:${match.endOffset}:${match.match}`,
+          ),
+        );
+        const requested = freshMatches.filter((match) =>
+          expectedKeys.has(`${match.startOffset}:${match.endOffset}:${match.match}`),
+        );
+        if (!requested.length) continue;
+        const nextContent = replaceProjectSourceMatches(
+          freshSource,
+          requested,
+          projectSearchQuery,
+          projectSearchReplacement,
+          projectSearchOptions,
+        );
+        if (nextContent === freshSource.content) continue;
+        const entry = entries.find((item) => item.id === source.entryId);
+        if (!entry) continue;
+        const saved = await saveFile(
+          source.entryId,
+          nextContent,
+          freshSource.version ?? entry.version,
+          { selectionBefore: null, selectionAfter: null },
+        );
+        const nextSource = { ...source, content: saved.content, version: saved.version };
+        updated.set(source.entryId, nextSource);
+        setContents((state) => ({
+          ...state,
+          [source.entryId]: { content: saved.content, version: saved.version },
+        }));
+        replaced += requested.length;
+      }
+      setProjectSearchSources((sources) =>
+        sources.map((source) => updated.get(source.entryId) ?? source),
+      );
+      setToast({
+        id: Date.now(),
+        tone: 'success',
+        message: `Replaced ${replaced} match${replaced === 1 ? '' : 'es'}`,
+      });
+    } catch (error) {
+      if (updated.size)
+        setProjectSearchSources((sources) =>
+          sources.map((source) => updated.get(source.entryId) ?? source),
+        );
+      setToast({
+        id: Date.now(),
+        tone: 'error',
+        message: error instanceof Error ? error.message : 'Unable to replace project matches',
+      });
+    } finally {
+      setProjectSearchReplacing(false);
+    }
+  }
+
+  function closeProjectSearch() {
+    closeTab(PROJECT_SEARCH_TAB_ID);
   }
 
   function updateEditHistory(entryId: string, history: EditHistoryResponse) {
@@ -1001,7 +1182,7 @@ export default function WorkspacePage() {
   });
 
   function currentCompileTarget(): AutoCompileTarget {
-    if (previewTarget === 'proposal' && activeProposal)
+    if (compilePreviewTarget === 'proposal' && activeProposal)
       return {
         target: 'proposal',
         proposalId: activeProposal.id,
@@ -1080,7 +1261,7 @@ export default function WorkspacePage() {
       return;
     }
     const target = selectAutoCompileTarget({
-      preferredTarget: previewTarget,
+      preferredTarget: compilePreviewTarget,
       acceptedRevision: payload.project.sourceRevision,
       acceptedCompiledRevision: acceptedCompile?.sourceRevision ?? null,
       proposal: activeProposal
@@ -1102,7 +1283,7 @@ export default function WorkspacePage() {
     activeProposal?.revision,
     autoCompileEnabled,
     payload?.project.sourceRevision,
-    previewTarget,
+    compilePreviewTarget,
     proposalCompile?.proposalRevision,
   ]);
 
@@ -1294,6 +1475,7 @@ export default function WorkspacePage() {
       before: currentLine.slice(0, Math.max(0, cursor.column - 1)),
       after: currentLine.slice(Math.max(0, cursor.column - 1)),
     };
+    lastForwardSelectionRef.current = sourceSelection;
     syncRequestRef.current?.controller.abort();
     const request = {
       id: (syncRequestRef.current?.id ?? 0) + 1,
@@ -1335,6 +1517,14 @@ export default function WorkspacePage() {
       });
     }
   }
+  useEffect(() => {
+    if (
+      shouldRefreshPdfSync(forward, successfulCompile?.id ?? null) &&
+      lastForwardSelectionRef.current
+    )
+      void forwardSearch(lastForwardSelectionRef.current);
+  }, [forward?.compilationId, successfulCompile?.id]);
+
   async function inverseSearch(page: number, x: number, y: number) {
     if (!successfulCompile) return;
     try {
@@ -1514,7 +1704,7 @@ export default function WorkspacePage() {
             <Target size={17} />
           </IconButton>
           <IconButton
-            label={`Search project${shortcuts['workspace.projectSearch'] ? ` (${displayShortcut(shortcuts['workspace.projectSearch'])})` : ''}`}
+            label={`Search the current project${shortcuts['workspace.projectSearch'] ? ` (${displayShortcut(shortcuts['workspace.projectSearch'])})` : ''}`}
             onClick={() => void openProjectSearch()}
           >
             <FileSearch size={17} />
@@ -1653,7 +1843,11 @@ export default function WorkspacePage() {
           onPointerDown={(event) => startResize('tree', event)}
         />
         <section
-          className={classNames('panel editor-panel', mobilePanel === 'editor' && 'mobile-active')}
+          className={classNames(
+            'panel editor-panel',
+            projectSearchOpen && 'project-search-open',
+            mobilePanel === 'editor' && 'mobile-active',
+          )}
         >
           <div className="tab-bar">
             {!filesVisible && !touchLayout && (
@@ -1666,6 +1860,27 @@ export default function WorkspacePage() {
               </IconButton>
             )}
             {openTabs.map((id) => {
+              if (id === PROJECT_SEARCH_TAB_ID)
+                return (
+                  <button
+                    key={id}
+                    className={classNames('editor-tab', id === selectedId && 'active')}
+                    onClick={() => {
+                      setSelectedId(PROJECT_SEARCH_TAB_ID);
+                      setMobilePanel('editor');
+                    }}
+                  >
+                    <FileSearch size={13} />
+                    <span>Project search results</span>
+                    <X
+                      size={13}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        closeProjectSearch();
+                      }}
+                    />
+                  </button>
+                );
               const proposalFile = agentProposal.virtualFiles.find(
                 (file) => `proposal:${file.changeId}` === id,
               );
@@ -1736,7 +1951,60 @@ export default function WorkspacePage() {
               </IconButton>
             )}
           </div>
+          {projectSearchOpen && (
+            <ProjectSearchBar
+              query={projectSearchQuery}
+              replacement={projectSearchReplacement}
+              replaceOpen={projectReplaceOpen}
+              options={projectSearchOptions}
+              resultCount={projectSearchResults.length}
+              activeResult={projectSearchActive}
+              loading={projectSearchLoading}
+              error={projectSearchValidationError}
+              replacing={projectSearchReplacing}
+              onQuery={(value) => {
+                setProjectSearchQuery(value);
+                setProjectSearchActive(0);
+              }}
+              onReplacement={setProjectSearchReplacement}
+              onReplaceOpen={setProjectReplaceOpen}
+              onOptions={(options) => {
+                setProjectSearchOptions(options);
+                setProjectSearchActive(0);
+              }}
+              onPrevious={() =>
+                setProjectSearchActive((value) =>
+                  projectSearchResults.length
+                    ? (value - 1 + projectSearchResults.length) % projectSearchResults.length
+                    : 0,
+                )
+              }
+              onNext={() =>
+                setProjectSearchActive((value) =>
+                  projectSearchResults.length ? (value + 1) % projectSearchResults.length : 0,
+                )
+              }
+              onReplace={() => {
+                const result = projectSearchResults[projectSearchActive];
+                if (result) void replaceProjectResults([result]);
+              }}
+              onReplaceAll={() => void replaceProjectResults(projectSearchResults, true)}
+              onClose={closeProjectSearch}
+            />
+          )}
           <div className="editor-workspace-stage">
+            {selectedId === PROJECT_SEARCH_TAB_ID && (
+              <ProjectSearchResults
+                query={projectSearchQuery}
+                results={projectSearchResults}
+                sources={projectSearchSources}
+                active={projectSearchActive}
+                loading={projectSearchLoading}
+                failedFiles={projectSearchFailedFiles}
+                onActive={setProjectSearchActive}
+                onOpen={(result) => void openProjectSearchResult(result)}
+              />
+            )}
             {activeEditorEntry && activeEditorContent && (
               <div
                 className={classNames(
@@ -1772,7 +2040,8 @@ export default function WorkspacePage() {
                         selectedId={agentProposal.selectedHunkId}
                         expanded={agentProposal.dockExpanded}
                         busy={agentProposal.busy || agentProposal.overlayBlocked}
-                        previewTarget={previewTarget}
+                        previewTarget={compilePreviewTarget}
+                        acceptedSourceAvailable={acceptedSourceAvailable}
                         compileStatus={latestProposalCompile?.status ?? null}
                         error={agentProposal.error}
                         onToggle={() => agentProposal.setDockExpanded((value) => !value)}
@@ -1783,13 +2052,15 @@ export default function WorkspacePage() {
                         onDecide={(itemId, decision) => void agentProposal.decide(itemId, decision)}
                         onAcceptAll={() => void agentProposal.acceptAll()}
                         onRejectAll={() => void agentProposal.rejectAll()}
-                        onPreviewTarget={setPreviewTarget}
+                        onPreviewTarget={(target) => {
+                          if (target === 'accepted' && !acceptedSourceAvailable) return;
+                          setPreviewTarget(target);
+                        }}
                         onFinish={() => void agentProposal.finish()}
                       />
                     ) : null
                   }
                   onChange={(entryId, content) => {
-                    setPreviewTarget('accepted');
                     setContents((state) => ({
                       ...state,
                       [entryId]: { ...state[entryId]!, content },
@@ -1835,7 +2106,8 @@ export default function WorkspacePage() {
                 />
               </div>
             )}
-            {!editorIsVisible &&
+            {selectedId !== PROJECT_SEARCH_TAB_ID &&
+              !editorIsVisible &&
               (!selected ? (
                 <div className="editor-empty editor-workspace-overlay">
                   <Code2 size={42} />
@@ -1868,6 +2140,11 @@ export default function WorkspacePage() {
             !previewVisible && !touchLayout && 'panel-hidden',
             mobilePanel === 'preview' && 'mobile-active',
           )}
+          data-preview-target={compilePreviewTarget}
+          data-preview-compilation-id={successfulCompile?.id ?? ''}
+          data-proposal-compilation-id={activeProposal?.compileJobId ?? ''}
+          data-proposal-revision={activeProposal?.revision ?? ''}
+          data-latest-proposal-compilation-id={latestProposalCompile?.id ?? ''}
         >
           {previewUrl ? (
             <PdfViewer
@@ -1903,7 +2180,7 @@ export default function WorkspacePage() {
           )}
           {problemsOpen && (
             <ProblemsPanel
-              job={latestCompile}
+              job={displayedCompile}
               activeTab={bottomTab}
               onTab={setBottomTab}
               onDiagnostic={(diagnostic) => {
@@ -2106,19 +2383,6 @@ export default function WorkspacePage() {
               run: () => void openEntry(entry),
             })),
         ]}
-      />
-      <ProjectSearchDialog
-        open={projectSearchOpen}
-        onOpenChange={(open) => {
-          setProjectSearchOpen(open);
-          if (!open) projectSearchRequestRef.current += 1;
-        }}
-        query={projectSearchQuery}
-        onQuery={setProjectSearchQuery}
-        sources={projectSearchSources}
-        loading={projectSearchLoading}
-        failedFiles={projectSearchFailedFiles}
-        onSelect={(result) => void openProjectSearchResult(result)}
       />
       <Dialog
         open={Boolean(conflictState)}

@@ -1,4 +1,4 @@
-import { and, asc, eq, isNull, sql } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNull, sql } from 'drizzle-orm';
 import {
   agentProjectGrants,
   agentProposals,
@@ -6,7 +6,10 @@ import {
   entries,
   fileBlobs,
   fileVersions,
+  libraryFolders,
   projectMemberships,
+  projectTagAssignments,
+  projectTags,
   projects,
 } from '@latex-workshop/db';
 import { agentProposalLimits, buildEntryPaths } from '@latex-workshop/contracts';
@@ -86,11 +89,14 @@ export async function createAgentProject(
   identity: AgentIdentity,
   input: {
     name: string;
+    folderId?: string | null | undefined;
+    tagIds?: string[] | undefined;
     sourceProjectId?: string | undefined;
     isTemplate: boolean;
     idempotencyKey: string;
   },
 ) {
+  const tagIds = input.tagIds ?? [];
   const projectId = deterministicUuid(
     `agent-project\0${identity.userId}\0${identity.clientId}\0${input.idempotencyKey}`,
   );
@@ -118,10 +124,45 @@ export async function createAgentProject(
       )
       .limit(1);
     if (!proposal) throw notFound('Created project proposal not found');
+    const assignments = await context.db
+      .select({ tagId: projectTagAssignments.tagId })
+      .from(projectTagAssignments)
+      .where(
+        and(
+          eq(projectTagAssignments.userId, identity.userId),
+          eq(projectTagAssignments.projectId, projectId),
+        ),
+      );
     return {
-      project: summarizeProject(existing.projects),
+      project: {
+        ...summarizeProject(existing.projects),
+        folderId: existing.project_memberships.folderId,
+        tagIds: assignments.map((assignment) => assignment.tagId),
+      },
       proposal: await getAgentClientProposal(context, identity, proposal.id),
     };
+  }
+
+  if (input.folderId) {
+    const [folder] = await context.db
+      .select({ id: libraryFolders.id })
+      .from(libraryFolders)
+      .where(
+        and(
+          eq(libraryFolders.id, input.folderId),
+          eq(libraryFolders.userId, identity.userId),
+          isNull(libraryFolders.trashedAt),
+        ),
+      )
+      .limit(1);
+    if (!folder) throw notFound('Folder not found');
+  }
+  if (tagIds.length) {
+    const tags = await context.db
+      .select({ id: projectTags.id })
+      .from(projectTags)
+      .where(and(eq(projectTags.userId, identity.userId), inArray(projectTags.id, tagIds)));
+    if (tags.length !== tagIds.length) throw notFound('One or more tags were not found');
   }
 
   const seed = input.sourceProjectId
@@ -163,7 +204,12 @@ export async function createAgentProject(
       projectId,
       userId: identity.userId,
       role: 'owner',
+      folderId: input.folderId ?? null,
     });
+    if (tagIds.length)
+      await tx
+        .insert(projectTagAssignments)
+        .values(tagIds.map((tagId) => ({ projectId, tagId, userId: identity.userId })));
     await tx
       .insert(agentProjectGrants)
       .values({
@@ -237,7 +283,12 @@ export async function createAgentProject(
       userId: identity.userId,
       projectId,
       action: 'project.created_by_agent',
-      details: { sourceProjectId: input.sourceProjectId ?? null, isTemplate: input.isTemplate },
+      details: {
+        sourceProjectId: input.sourceProjectId ?? null,
+        isTemplate: input.isTemplate,
+        folderId: input.folderId ?? null,
+        tagIds,
+      },
     });
     return result!;
   });
@@ -260,7 +311,14 @@ export async function createAgentProject(
     expectedProposalRevision: proposal.revision,
     idempotencyKey: deterministicUuid(`${input.idempotencyKey}\0finish`),
   });
-  return { project: summarizeProject(created), proposal };
+  return {
+    project: {
+      ...summarizeProject(created),
+      folderId: input.folderId ?? null,
+      tagIds,
+    },
+    proposal,
+  };
 }
 
 export async function renameAgentProject(

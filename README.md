@@ -32,8 +32,10 @@ The compile worker launches short-lived TeX containers through the Docker socket
 The optional Streamable HTTP MCP endpoint lets an OAuth-authenticated agent read selected projects
 and create reviewable proposals without writing accepted source directly. It is disabled by default.
 For a local test, set `AGENT_MCP_ENABLED=true` and connect an MCP client to
-`http://localhost:3001/api/mcp`. Hosted clients require a public HTTPS URL, so expose the web/API
-ingress through a secure tunnel and set `AGENT_MCP_RESOURCE_URL` to its exact `/api/mcp` URL.
+`http://localhost:3001/api/mcp`. A public deployment sets `AGENT_MCP_RESOURCE_URL` to its canonical
+HTTPS `/api/mcp` URL. A private ChatGPT deployment uses Secure MCP Tunnel and sets it to the OpenAI
+protected-resource URL printed by `infra/openai-mcp-tunnel/configure.sh`; the tunnel separately
+forwards to the private Tailscale `/api/mcp` URL.
 
 The OAuth consent screen asks the owner to choose projects. Active connections and grants can be
 changed or revoked under Account settings → Agent access. Agents can read source, build an isolated
@@ -45,6 +47,12 @@ Account settings also exposes the canonical remote MCP URL. Add that same URL to
 Grok installation; each device authorizes once and stores its own rotating refresh credential. The
 server supplies current instructions, tool descriptions, and the editing-guide resource at runtime,
 so workflow updates do not need to be copied into every harness configuration.
+
+For ChatGPT on the web, use the repository workspace plugin instead of adding a raw MCP declaration:
+the plugin references a registered ChatGPT app and bundles the workflow that routes LaTeX Workshop
+requests to `list_projects`. Follow [the ChatGPT web rollout](docs/chatgpt-web.md) to register the
+production endpoint, replace the deployment app id, import the GitHub marketplace, and configure
+workspace installation and action policies.
 
 Dynamic client registration is off by default. Enable `AGENT_MCP_DCR_ENABLED=true` only for older
 clients that cannot use client ID metadata documents. Keep the configured read/write limits in
@@ -63,6 +71,12 @@ MCP prompts and resources.
 The endpoint serves both the current MCP transport and the stateless 2025 compatibility protocol
 negotiated by Codex. Keep both paths enabled when upgrading the MCP SDK; rejecting legacy protocol
 handshakes prevents Codex from discovering any of the project tools.
+
+Agents can inspect the accessible Library folder tree and tag catalog, create/rename/move/trash
+folders, create/rename/delete tags, move projects, and replace a project's tag assignments.
+Project-scoped connections see organization associated with their grants; organization changes
+that would affect an ungranted project are refused. `create_project` accepts an existing folder and
+tags so agents can follow the user's established Library organization when the evidence is clear.
 
 Agents can create and rename projects without a separate confirmation step. `create_project` can
 start from the standard blank document or the accepted source of any granted project, and it can

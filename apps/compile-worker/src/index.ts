@@ -10,6 +10,7 @@ import {
   pdfPageRenderQueuePayloadSchema,
   pdfPageRenderRequestKey,
   pdfPageRenderRequestSchema,
+  selectCheckpointMainFile,
 } from '@latex-workshop/contracts';
 import {
   agentProposals,
@@ -69,11 +70,9 @@ const worker = new Worker<{ compileJobId: string }>(
       .from(projects)
       .where(eq(projects.id, job.projectId))
       .limit(1);
-    if (!checkpoint || !project?.mainFileId) throw new Error('Compilation snapshot is incomplete');
+    if (!checkpoint || !project) throw new Error('Compilation snapshot is incomplete');
     const manifest = checkpointManifestSchema.parse(checkpoint.manifest);
-    const main =
-      manifest.find((item) => item.entryId === project.mainFileId) ??
-      manifest.find((item) => item.path === 'main.tex');
+    const main = selectCheckpointMainFile(manifest, project.mainFileId, job.target === 'proposal');
     if (!main) throw new Error('Main file is not present in the compilation snapshot');
     await db
       .update(compileJobs)

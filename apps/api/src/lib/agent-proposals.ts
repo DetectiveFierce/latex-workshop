@@ -8,6 +8,7 @@ import {
   normalizeArchivePath,
   proposalHunkContentHash,
   projectAcceptedHunks,
+  selectCheckpointMainFile,
   type AgentProposal,
 } from '@latex-workshop/contracts';
 import {
@@ -26,6 +27,7 @@ import {
   fileBlobs,
   fileVersions,
   projectMemberships,
+  projectTagAssignments,
   projects,
   type CheckpointManifestEntry,
 } from '@latex-workshop/db';
@@ -148,7 +150,7 @@ export async function listGrantedProjects(context: AppContext, identity: AgentId
     .limit(1);
   const rows = policy?.allProjects
     ? await context.db
-        .select({ project: projects })
+        .select({ project: projects, membership: projectMemberships })
         .from(projects)
         .innerJoin(projectMemberships, eq(projectMemberships.projectId, projects.id))
         .where(
@@ -159,7 +161,7 @@ export async function listGrantedProjects(context: AppContext, identity: AgentId
           ),
         )
     : await context.db
-        .select({ project: projects })
+        .select({ project: projects, membership: projectMemberships })
         .from(agentProjectGrants)
         .innerJoin(projects, eq(projects.id, agentProjectGrants.projectId))
         .innerJoin(
@@ -177,12 +179,32 @@ export async function listGrantedProjects(context: AppContext, identity: AgentId
             isNull(projects.trashedAt),
           ),
         );
-  return rows.map(({ project }) => ({
+  const projectIds = rows.map(({ project }) => project.id);
+  const assignments = projectIds.length
+    ? await context.db
+        .select({ projectId: projectTagAssignments.projectId, tagId: projectTagAssignments.tagId })
+        .from(projectTagAssignments)
+        .where(
+          and(
+            eq(projectTagAssignments.userId, identity.userId),
+            inArray(projectTagAssignments.projectId, projectIds),
+          ),
+        )
+    : [];
+  const tagIdsByProject = new Map<string, string[]>();
+  for (const assignment of assignments) {
+    const tagIds = tagIdsByProject.get(assignment.projectId) ?? [];
+    tagIds.push(assignment.tagId);
+    tagIdsByProject.set(assignment.projectId, tagIds);
+  }
+  return rows.map(({ project, membership }) => ({
     id: project.id,
     name: project.name,
     sourceRevision: project.sourceRevision,
     compiler: project.compiler,
     isTemplate: project.isTemplate,
+    folderId: membership.folderId,
+    tagIds: tagIdsByProject.get(project.id) ?? [],
   }));
 }
 
@@ -981,8 +1003,9 @@ export async function requestProposalCompilation(
     return getAgentProposal(context, identity.userId, proposalId);
   }
   const project = await requireGrantedProject(context, identity, proposal.projectId);
-  if (!project.mainFileId) throw badRequest('Select a main .tex file before compiling');
   const manifest = await createProposalManifest(context, proposal);
+  if (!selectCheckpointMainFile(manifest, project.mainFileId, true))
+    throw badRequest('Add a .tex file to the proposal before compiling');
   const [checkpoint] = await context.db
     .insert(checkpoints)
     .values({
@@ -2428,6 +2451,7 @@ export async function putOwnerProposalFile(
       .set({
         revision: locked.revision + 1,
         totalBytes: nextTotal,
+        latestCompileJobId: null,
         updatedAt: new Date(),
       })
       .where(and(eq(agentProposals.id, proposalId), eq(agentProposals.revision, locked.revision)))
