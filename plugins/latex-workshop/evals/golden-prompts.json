@@ -13,7 +13,12 @@
     {
       "name": "follow-up edit",
       "prompt": "Now tighten the conclusion in that same project.",
-      "expect": "Reuse the previously resolved project, reread relevant accepted source, and create a new proposal revision."
+      "expect": "Activate the Mind Palace LaTeX Workshop tools again despite the omitted product and project names; call list_projects, resolve the previously named project from fresh results, reread relevant accepted source, and create a new proposal revision."
+    },
+    {
+      "name": "follow-up retry",
+      "prompt": "Try that again and compile it this time.",
+      "expect": "Keep the Mind Palace connection active from conversation context, call list_projects again, recover current project state, and complete the compile workflow without asking the user to re-enable the plugin."
     },
     {
       "name": "missing grant",

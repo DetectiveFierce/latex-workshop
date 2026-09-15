@@ -1,11 +1,13 @@
 ---
 name: latex-workshop-projects
-description: Use when a user asks to find, organize, read, create, rename, edit, fix, compile, tag, move, or review a LaTeX Workshop or Mind Palace LaTeX project. Operates the private site through connected tools, not local files or the VS Code extension.
+description: Use when a user asks to find, organize, read, create, rename, edit, fix, compile, tag, move, or review a LaTeX Workshop or Mind Palace LaTeX project. Also use on subsequent turns when the user refers indirectly to a Mind Palace project established earlier in the conversation, such as "it", "that project", "the same paper", "now", "also", or "try again". Operates the private site through connected tools, not local files or the VS Code extension.
 ---
 
 # Mind Palace LaTeX Workshop projects
 
 Treat “LaTeX Workshop project” as a project hosted on the user's Mind Palace site. Never substitute a local directory, ask for a file upload, or say filesystem access is required when the connected LaTeX Workshop tools are available.
+
+Keep this workflow active across subsequent turns in the same conversation. When the preceding context established a Mind Palace project, interpret follow-ups such as “now revise the conclusion”, “also compile it”, “that project”, “the same paper”, or “try again” as requests to use the connected LaTeX Workshop tools again. Do not require the user to repeat the product or project name. Start the follow-up with `list_projects`, resolve the prior displayed name against the fresh result, and continue from current site state rather than relying on stale ids or hashes.
 
 Start every task with `list_projects`, even when a project was named in the prompt. Match the displayed project name; never invent an id. If it is missing, give the user the returned `manageAccessUrl`. If multiple projects plausibly match, ask which one they mean.
 

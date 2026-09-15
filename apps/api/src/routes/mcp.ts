@@ -41,6 +41,7 @@ import {
   mindPalaceEditingGuideUri,
   mindPalaceMcpInstructions,
   mindPalaceMcpServerName,
+  mindPalaceMcpServerVersion,
   projectScopeRule,
 } from '../lib/mcp-agent-guide.js';
 import {
@@ -243,7 +244,7 @@ async function createServer(context: AppContext, claims: unknown) {
     workspaceUrl: workspaceUrl(project.id),
   });
   const server = new McpServer(
-    { name: mindPalaceMcpServerName, version: '0.5.0' },
+    { name: mindPalaceMcpServerName, version: mindPalaceMcpServerVersion },
     { instructions: mindPalaceMcpInstructions },
   );
 
@@ -278,7 +279,7 @@ async function createServer(context: AppContext, claims: unknown) {
     {
       title: 'List Mind Palace LaTeX Workshop projects',
       description:
-        'Use this first for every request to read, create, place, move, rename, compile, or edit a Mind Palace LaTeX Workshop project. These are private site-hosted projects, not local files. Match displayed names and never guess ids. Results include Library folders plus each project folderId/tagIds. Create directly in a folder with create_project(folderId). Move an existing project with organize_library action move_project and destination folderId; null means Library root. If a project is absent, send the user to manageAccessUrl.',
+        'Use this first for every request to read, create, place, move, rename, compile, or edit a Mind Palace LaTeX Workshop project. Also use it again on conversational follow-ups such as "now update it", "that project", "the same paper", or "try again" when earlier messages identified a Mind Palace project, even if the current message omits the product name. These are private site-hosted projects, not local files. Match displayed names and never guess ids. Results include Library folders plus each project folderId/tagIds. Create directly in a folder with create_project(folderId). Move an existing project with organize_library action move_project and destination folderId; null means Library root. If a project is absent, send the user to manageAccessUrl.',
       inputSchema: z.object({}),
       outputSchema: listProjectsOutputSchema,
       ...mcpToolMetadata('read'),

@@ -6,15 +6,20 @@ import {
   mindPalaceEditingGuideUri,
   mindPalaceMcpInstructions,
   mindPalaceMcpServerName,
+  mindPalaceMcpServerVersion,
   projectScopeRule,
 } from './mcp-agent-guide.js';
 
 describe('Mind Palace MCP agent guidance', () => {
   it('identifies the site and defines the complete proposal lifecycle', () => {
     expect(mindPalaceMcpServerName).toBe('Mind Palace LaTeX Workshop');
+    expect(mindPalaceMcpServerVersion).toBe('0.5.1');
     expect(mindPalaceMcpInstructions).toContain('Mind Palace site');
     expect(mindPalaceMcpInstructions).toContain('not the VS Code extension');
     expect(mindPalaceMcpInstructions).toContain('Do not claim filesystem access is required');
+    expect(mindPalaceMcpInstructions).toContain('remains available throughout the conversation');
+    expect(mindPalaceMcpInstructions).toContain('the same paper');
+    expect(mindPalaceMcpInstructions).toContain('Call list_projects again');
     expect(mindPalaceMcpInstructions).toContain('manageAccessUrl');
     expect(mindPalaceMcpInstructions).toContain('reviewUrl');
     expect(mindPalaceMcpInstructions).toContain('create_project');
@@ -94,6 +99,8 @@ describe('Mind Palace MCP agent guidance', () => {
       'manageAccessUrl',
       'reviewUrl',
       'filesystem limitation',
+      'subsequent turns',
+      'that project',
     ])
       expect(skill, `workspace skill should contain ${term}`).toContain(term);
   });

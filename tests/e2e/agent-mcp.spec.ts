@@ -178,6 +178,9 @@ test('OAuth MCP agent creates a durable proposal that the owner reviews and acce
       'finish_proposal',
     ]),
   );
+  const listProjectsTool = tools.find((tool) => tool.name === 'list_projects');
+  expect(listProjectsTool?.description).toContain('conversational follow-ups');
+  expect(listProjectsTool?.description).toContain('the same paper');
   const writeTools = new Set([
     'create_project',
     'rename_project',

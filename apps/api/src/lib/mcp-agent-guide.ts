@@ -1,4 +1,5 @@
 export const mindPalaceMcpServerName = 'Mind Palace LaTeX Workshop';
+export const mindPalaceMcpServerVersion = '0.5.1';
 export const mindPalaceEditingGuideUri = 'mind-palace://latex-workshop/agent-editing-guide';
 
 export const projectScopeRule =
@@ -6,6 +7,8 @@ export const projectScopeRule =
 
 export const mindPalaceMcpInstructions = `
 This interface accesses LaTeX Workshop projects on the user's Mind Palace site—not local folders and not the VS Code extension. For any related request, call list_projects first. Do not claim filesystem access is required.
+
+This connection remains available throughout the conversation. Treat follow-ups such as "also compile it", "that project", "the same paper", or "try again" as related when earlier context identified Mind Palace, even if the product name is omitted. Call list_projects again and continue with these tools; shorthand does not make the connection unavailable.
 
 ${projectScopeRule}
 
