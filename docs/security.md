@@ -22,6 +22,15 @@ Access to the container daemon is equivalent to host authority. Restrict it to d
 - Structured logging redacts cookies and authorization data. Audit records cover imports, restores, deletion, and quota-affecting operations.
 - Unauthorized and nonexistent tenant resources share the same `404` behavior to limit enumeration.
 
+## Dependency security pins
+
+DOMPurify, fast-uri, brace-expansion, and source-map-js are pinned to patched releases
+in the root `pnpm.overrides`, preserving existing major versions. Remove each override
+when its parent dependencies resolve a patched version without it. Fastify and Nodemailer
+are updated directly. The TypeScript ESLint update removes the unpatched braces dependency
+from the development tooling. Keep `pnpm security:audit` as the release gate and record
+the resolved graph in `pnpm-lock.yaml`.
+
 ## AI agent authorization boundary
 
 The MCP service is disabled unless `AGENT_MCP_ENABLED=true`. In production its resource URL must be

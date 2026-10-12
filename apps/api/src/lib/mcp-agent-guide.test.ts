@@ -13,7 +13,7 @@ import {
 describe('Mind Palace MCP agent guidance', () => {
   it('identifies the site and defines the complete proposal lifecycle', () => {
     expect(mindPalaceMcpServerName).toBe('Mind Palace LaTeX Workshop');
-    expect(mindPalaceMcpServerVersion).toBe('0.5.1');
+    expect(mindPalaceMcpServerVersion).toBe('0.5.2');
     expect(mindPalaceMcpInstructions).toContain('Mind Palace site');
     expect(mindPalaceMcpInstructions).toContain('not the VS Code extension');
     expect(mindPalaceMcpInstructions).toContain('Do not claim filesystem access is required');
@@ -33,7 +33,9 @@ describe('Mind Palace MCP agent guidance', () => {
     expect(projectScopeRule).toContain('Do not use start_proposal');
     expect(projectScopeRule).toContain('MUST call rename_project');
     expect(mindPalaceMcpInstructions).toContain(mindPalaceEditingGuideUri);
-    expect(mindPalaceMcpInstructions.length).toBeLessThan(2_000);
+    expect(mindPalaceMcpInstructions.length).toBeLessThan(2_500);
+    expect(mindPalaceMcpInstructions).toContain('without accepting it first');
+    expect(mindPalaceEditingGuide).toContain('without accepting or rejecting it first');
     expect(mindPalaceEditingGuide).toContain('every byte of seeded source');
     expect(mindPalaceEditingGuide).toContain('Source remains unaccepted');
 

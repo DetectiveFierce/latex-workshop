@@ -431,7 +431,7 @@ async function createServer(context: AppContext, claims: unknown) {
       const proposal = await startAgentProposal(context, identity, input);
       return jsonResult(
         proposalSummary(proposal),
-        `Started proposal ${proposal.id} at revision ${proposal.revision}.`,
+        `Proposal ${proposal.id} is ${proposal.status} at revision ${proposal.revision}. ${proposal.status === 'reviewing' ? 'Revise this same proposal with put_proposal_file or propose_structure using this revision, then finish_proposal again. No owner acceptance is required before revising.' : 'Use this revision for the next proposal write.'}`,
       );
     },
   );
@@ -440,7 +440,7 @@ async function createServer(context: AppContext, claims: unknown) {
     {
       title: 'Write a Mind Palace LaTeX Workshop proposal file',
       description:
-        'Use this to create or replace a complete UTF-8 file inside a Mind Palace LaTeX Workshop proposal. It changes only the reviewable proposal, never accepted source. For a newly created project or template, use the proposal returned by create_project, not its source project.',
+        'Create or replace a complete UTF-8 Mind Palace LaTeX Workshop proposal file. Works on draft, needs_rebase, and finalized reviewing proposals: a feedback write reopens the same proposal as draft without owner acceptance. Refresh get_proposal first and use its current expectedProposalRevision; finish_proposal again afterward. Accepted source stays unchanged. For a newly created project, use its returned proposal.',
       inputSchema: putAgentProposalFileSchema.extend({ proposalId: z.uuid() }),
       outputSchema: proposalMutationOutputSchema,
       ...mcpToolMetadata('write'),
@@ -465,7 +465,7 @@ async function createServer(context: AppContext, claims: unknown) {
     {
       title: 'Propose Mind Palace LaTeX Workshop structure changes',
       description:
-        'Use this to propose file or folder moves, renames, or deletions inside one Mind Palace LaTeX Workshop project. It changes only the reviewable proposal, not accepted source. Use create_project or rename_project for top-level Library items. Use exact paths and chain expectedProposalRevision.',
+        'Propose Mind Palace LaTeX Workshop file or folder moves, renames, deletions, or folders. A finalized reviewing proposal can be revised without acceptance: refresh get_proposal, chain expectedProposalRevision, then finish_proposal again. Accepted source stays unchanged. Use create_project or rename_project for top-level Library items.',
       inputSchema: proposeAgentStructureSchema.extend({ proposalId: z.uuid() }),
       outputSchema: proposalMutationOutputSchema,
       ...mcpToolMetadata('write'),
@@ -497,7 +497,7 @@ async function createServer(context: AppContext, claims: unknown) {
       const proposal = await getAgentClientProposal(context, identity, proposalId);
       return jsonResult(
         proposalSummary(proposal),
-        `Proposal ${proposal.id} is ${proposal.status} at revision ${proposal.revision}.`,
+        `Proposal ${proposal.id} is ${proposal.status} at revision ${proposal.revision}.${proposal.status === 'reviewing' ? ' You can revise this finalized proposal without accepting it first: write with this revision, then finish_proposal again.' : ''}`,
       );
     },
   );
@@ -606,7 +606,7 @@ async function createServer(context: AppContext, claims: unknown) {
           compile: compileJobSummary(compile),
           reviewUrl,
         },
-        `Proposal ${proposal.id} is ${proposal.status} at revision ${proposal.revision}. Owner review: ${reviewUrl}`,
+        `Proposal ${proposal.id} is ${proposal.status} at revision ${proposal.revision}. Owner review: ${reviewUrl}. For feedback, refresh get_proposal and write to this same proposal with its latest revision; no acceptance is required before revising.`,
       );
     },
   );

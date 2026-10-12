@@ -1,5 +1,5 @@
 export const mindPalaceMcpServerName = 'Mind Palace LaTeX Workshop';
-export const mindPalaceMcpServerVersion = '0.5.1';
+export const mindPalaceMcpServerVersion = '0.5.2';
 export const mindPalaceEditingGuideUri = 'mind-palace://latex-workshop/agent-editing-guide';
 
 export const projectScopeRule =
@@ -14,7 +14,7 @@ ${projectScopeRule}
 
 list_projects returns Library folders, tags, project folderId/tagIds, organizationComplete, and manageAccessUrl. Never guess ids. Create directly in a folder with create_project folderId. Move an existing project with organize_library action move_project, its projectId, and the destination folderId; folderId=null means Library root. These are top-level Library operations, not proposal structure edits. Refresh list_projects after changes. Read ${mindPalaceEditingGuideUri} before multi-step writes or when handling pagination, conflicts, compile failure, or owner handoff.
 
-For a new project, honor explicit placement or infer folder/tag conventions from similar projects; avoid speculative tags. Creation, renaming, and Library organization are immediate metadata operations. Source-tree changes use isolated proposals. finish_proposal compiles one revision for owner review. Return reviewUrl; only the owner can apply changes.
+For a new project, honor explicit placement or infer folder/tag conventions from similar projects; avoid speculative tags. Creation, renaming, and Library organization are immediate metadata operations. Source-tree changes use isolated proposals. finish_proposal compiles one revision for owner review. Return reviewUrl; only the owner can apply changes. User feedback can revise that same reviewing proposal without accepting it first: get_proposal, write with its latest revision, then finish_proposal again.
 `.trim();
 
 export const mindPalaceEditingGuide = `# Editing a Mind Palace LaTeX Workshop project
@@ -63,7 +63,7 @@ Do not translate “create a template” into “create a .tex file.” Do not t
 - \`expectedProposalRevision\` is compare-and-swap protection. Always take it from the immediately preceding proposal response.
 - Reuse an idempotency key only when retrying the exact same operation after an uncertain transport result.
 - \`needs_rebase\` means accepted source changed after the draft was based. Reread each path in \`conflicts\`, reconstruct the desired complete file with its current hash, write it again, recompile, and finish again.
-- A write to a proposal already in \`reviewing\` reopens it as \`draft\`; finish the revised version again and inspect its automatically returned compile.
+- User feedback can revise a finalized, unaccepted proposal without accepting or rejecting it first. Refresh \`get_proposal\` (or \`start_proposal\`, which returns this client's active proposal), inspect current changes and accepted source, then use \`put_proposal_file\` or \`propose_structure\` with the latest revision. A write to a proposal already in \`reviewing\` reopens it as \`draft\`, resets frozen review decisions, and clears the old compile pointer. Finish the revised version again and inspect its automatically returned compile. Resolved and rejected proposals cannot be revised; start a new proposal instead.
 - Only the owner can apply a proposal. Link the \`reviewUrl\` returned by \`finish_proposal\` and tell the user to use the Mind Palace proposal review controls to accept the desired hunks.
 `;
 

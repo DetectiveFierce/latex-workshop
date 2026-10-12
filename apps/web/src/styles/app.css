@@ -1261,6 +1261,7 @@ p {
   font-size: calc(13px * var(--ui-font-scale));
 }
 .editor-panel {
+  position: relative;
   display: grid;
   grid-template-rows: 36px minmax(0, 1fr);
 }
@@ -1356,6 +1357,7 @@ p {
   border-radius: 50%;
 }
 .editor-container {
+  min-width: 0;
   height: 100%;
   min-height: 0;
   position: relative;
@@ -1365,6 +1367,7 @@ p {
 }
 .editor-workspace-stage,
 .workspace-editor-controller {
+  min-width: 0;
   height: 100%;
   min-height: 0;
   position: relative;

@@ -2030,36 +2030,6 @@ export default function WorkspacePage() {
                     void agentProposal.persistEdit(edit);
                   }}
                   onDecideHunk={(hunkId, decision) => void agentProposal.decide(hunkId, decision)}
-                  proposalDock={
-                    activeProposal ? (
-                      <ProposalEditorDock
-                        status={activeProposal.status}
-                        currentAdded={agentProposal.totals.added}
-                        currentDeleted={agentProposal.totals.deleted}
-                        items={agentProposal.items}
-                        selectedId={agentProposal.selectedHunkId}
-                        expanded={agentProposal.dockExpanded}
-                        busy={agentProposal.busy || agentProposal.overlayBlocked}
-                        previewTarget={compilePreviewTarget}
-                        acceptedSourceAvailable={acceptedSourceAvailable}
-                        compileStatus={latestProposalCompile?.status ?? null}
-                        error={agentProposal.error}
-                        onToggle={() => agentProposal.setDockExpanded((value) => !value)}
-                        onSelect={(item) => {
-                          agentProposal.selectItem(item);
-                          openProposalPath(item.path);
-                        }}
-                        onDecide={(itemId, decision) => void agentProposal.decide(itemId, decision)}
-                        onAcceptAll={() => void agentProposal.acceptAll()}
-                        onRejectAll={() => void agentProposal.rejectAll()}
-                        onPreviewTarget={(target) => {
-                          if (target === 'accepted' && !acceptedSourceAvailable) return;
-                          setPreviewTarget(target);
-                        }}
-                        onFinish={() => void agentProposal.finish()}
-                      />
-                    ) : null
-                  }
                   onChange={(entryId, content) => {
                     setContents((state) => ({
                       ...state,
@@ -2129,6 +2099,34 @@ export default function WorkspacePage() {
                 </div>
               ))}
           </div>
+          {activeProposal && editorIsVisible && (
+            <ProposalEditorDock
+              status={activeProposal.status}
+              currentAdded={agentProposal.totals.added}
+              currentDeleted={agentProposal.totals.deleted}
+              items={agentProposal.items}
+              selectedId={agentProposal.selectedHunkId}
+              expanded={agentProposal.dockExpanded}
+              busy={agentProposal.busy || agentProposal.overlayBlocked}
+              previewTarget={compilePreviewTarget}
+              acceptedSourceAvailable={acceptedSourceAvailable}
+              compileStatus={latestProposalCompile?.status ?? null}
+              error={agentProposal.error}
+              onToggle={() => agentProposal.setDockExpanded((value) => !value)}
+              onSelect={(item) => {
+                agentProposal.selectItem(item);
+                openProposalPath(item.path);
+              }}
+              onDecide={(itemId, decision) => void agentProposal.decide(itemId, decision)}
+              onAcceptAll={() => void agentProposal.acceptAll()}
+              onRejectAll={() => void agentProposal.rejectAll()}
+              onPreviewTarget={(target) => {
+                if (target === 'accepted' && !acceptedSourceAvailable) return;
+                setPreviewTarget(target);
+              }}
+              onFinish={() => void agentProposal.finish()}
+            />
+          )}
         </section>
         <div
           className={classNames('resizer', !previewVisible && !touchLayout && 'panel-hidden')}

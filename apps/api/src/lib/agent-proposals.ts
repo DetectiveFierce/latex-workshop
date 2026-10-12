@@ -551,8 +551,6 @@ export async function putAgentProposalFile(
 ) {
   const proposal = await loadAgentOwnedProposal(context, identity, proposalId);
   await requireGrantedProject(context, identity, proposal.projectId);
-  if (proposal.revision !== input.expectedProposalRevision)
-    return getAgentProposal(context, identity.userId, proposalId);
   const path = normalizeArchivePath(input.path);
   const bytes = Buffer.from(input.content);
   assertProposalWriteLimits({
@@ -707,8 +705,6 @@ export async function proposeAgentStructure(
 ) {
   const proposal = await loadAgentOwnedProposal(context, identity, proposalId);
   await requireGrantedProject(context, identity, proposal.projectId);
-  if (proposal.revision !== input.expectedProposalRevision)
-    return getAgentProposal(context, identity.userId, proposalId);
   const tree = await projectEntries(context, proposal.projectId);
   const byPath = new Map(tree.rows.map((entry) => [tree.paths.get(entry.id) ?? entry.name, entry]));
   const byLowerPath = new Map([...byPath].map(([path, entry]) => [path.toLowerCase(), entry]));

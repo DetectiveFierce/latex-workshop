@@ -409,7 +409,65 @@ test('OAuth MCP agent creates a durable proposal that the owner reviews and acce
     status: 'reviewing',
     compile: { status: 'succeeded', target: 'proposal' },
   });
-  const finishedCompileId = String((finished.compile as { id: unknown }).id);
+  // A follow-up must revise the same review without accepting the first result.
+  const resumed = await callTool(agentRequest, accessToken, 'start_proposal', {
+    projectId,
+    title: 'Address feedback',
+    idempotencyKey: randomUUID(),
+  });
+  expect(resumed).toMatchObject({ id: started.id, status: 'reviewing' });
+  const feedbackWrite = {
+    proposalId: resumed.id,
+    expectedProposalRevision: resumed.revision,
+    idempotencyKey: randomUUID(),
+    path: 'main.tex',
+    content: proposedMain.replace('Added closing note.', 'Revised closing note after feedback.'),
+    baseHash: source.hash,
+  };
+  const revised = await callTool(agentRequest, accessToken, 'put_proposal_file', feedbackWrite);
+  expect(revised).toMatchObject({ id: started.id, status: 'draft', compileJobId: null });
+  expect(revised.revision).toBeGreaterThan(resumed.revision);
+  const repeated = await callTool(agentRequest, accessToken, 'put_proposal_file', feedbackWrite);
+  expect(repeated.revision).toBe(revised.revision);
+  await expect(
+    callTool(agentRequest, accessToken, 'put_proposal_file', {
+      ...feedbackWrite,
+      idempotencyKey: randomUUID(),
+    }),
+  ).rejects.toThrow('Proposal revision is stale');
+  expect(
+    (await callTool(agentRequest, accessToken, 'read_text_file', { projectId, path: 'main.tex' }))
+      .content,
+  ).toBe(source.content);
+  const refinished = await callTool(agentRequest, accessToken, 'finish_proposal', {
+    proposalId: revised.id,
+    expectedProposalRevision: revised.revision,
+    idempotencyKey: randomUUID(),
+  });
+  expect(refinished).toMatchObject({ status: 'reviewing', compile: { status: 'succeeded' } });
+  await expect(
+    callTool(agentRequest, accessToken, 'propose_structure', {
+      proposalId: refinished.id,
+      expectedProposalRevision: revised.revision,
+      idempotencyKey: randomUUID(),
+      changes: [{ operation: 'create_folder', targetPath: 'feedback' }],
+    }),
+  ).rejects.toThrow('Proposal revision is stale');
+  const restructured = await callTool(agentRequest, accessToken, 'propose_structure', {
+    proposalId: refinished.id,
+    expectedProposalRevision: refinished.revision,
+    idempotencyKey: randomUUID(),
+    changes: [{ operation: 'create_folder', targetPath: 'feedback' }],
+  });
+  expect(restructured).toMatchObject({ id: started.id, status: 'draft', compileJobId: null });
+  const finalReview = await callTool(agentRequest, accessToken, 'finish_proposal', {
+    proposalId: restructured.id,
+    expectedProposalRevision: restructured.revision,
+    idempotencyKey: randomUUID(),
+  });
+  expect(finalReview).toMatchObject({ status: 'reviewing', compile: { status: 'succeeded' } });
+  const finishedCompileId = String((finalReview.compile as { id: unknown }).id);
+  expect(finishedCompileId).not.toBe(String((finished.compile as { id: unknown }).id));
   await page.goto(`/latex-workshop/projects/${projectId}`);
   const review = page.locator('.proposal-editor-dock');
   await expect(review).toBeVisible();
@@ -427,6 +485,37 @@ test('OAuth MCP agent creates a durable proposal that the owner reviews and acce
   }
   await expect(page.locator('.proposal-addition-line').first()).toBeVisible();
   await expect(page.locator('.proposal-deletion-zone').first()).toBeVisible();
+
+  const expectCenteredDock = async () => {
+    await expect(review).toBeVisible();
+    await expect
+      .poll(async () => {
+        const editor = await page.locator('.editor-panel').boundingBox();
+        const dock = await review.boundingBox();
+        if (!editor || !dock) return Infinity;
+        return Math.abs(dock.x + dock.width / 2 - (editor.x + editor.width / 2));
+      })
+      .toBeLessThan(2);
+    const editor = await page.locator('.editor-panel').boundingBox();
+    const dock = await review.boundingBox();
+    if (!editor || !dock) throw new Error('Missing editor or proposal dock');
+    expect(dock.x).toBeGreaterThanOrEqual(editor.x);
+    expect(dock.x + dock.width).toBeLessThanOrEqual(editor.x + editor.width);
+  };
+  await expectCenteredDock();
+  await page.getByLabel('Hide PDF preview').click();
+  await expectCenteredDock();
+  await page.screenshot({ path: test.info().outputPath('proposal-dock-without-pdf.png') });
+  await page.getByLabel('Show PDF preview').click();
+  await expectCenteredDock();
+  await page.screenshot({ path: test.info().outputPath('proposal-dock-with-pdf.png') });
+  await page.getByLabel('Expand proposal details').click();
+  await expectCenteredDock();
+  await page.getByLabel('Hide PDF preview').click();
+  await expectCenteredDock();
+  await page.getByLabel('Show PDF preview').click();
+  await expectCenteredDock();
+  await page.getByLabel('Collapse proposal details').click();
 
   await page
     .locator('.view-lines')
@@ -599,7 +688,7 @@ async function callTool(
   expect(response.ok(), await response.text()).toBeTruthy();
   const message = await parseMcpResponse(response);
   const result = message.result as { isError?: boolean; structuredContent?: unknown } | undefined;
-  expect(result?.isError).not.toBe(true);
+  expect(result?.isError, JSON.stringify(message)).not.toBe(true);
   const structured = result?.structuredContent;
   if (typeof structured !== 'object' || structured === null || Array.isArray(structured))
     throw new Error('MCP tool did not return a structured object');

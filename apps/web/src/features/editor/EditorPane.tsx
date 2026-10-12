@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import Editor, { loader, type OnMount } from '@monaco-editor/react';
 import { get, set, del } from 'idb-keyval';
 import * as Monaco from 'monaco-editor';
@@ -111,7 +111,6 @@ export function EditorPane({
   onSelectHunk,
   onProposalEdit,
   onDecideHunk,
-  proposalDock,
   lspEnabled = true,
 }: {
   projectId: string;
@@ -161,7 +160,6 @@ export function EditorPane({
   onSelectHunk?: (hunkId: string) => void;
   onProposalEdit?: (edit: ProposalEdit) => void;
   onDecideHunk?: (hunkId: string, decision: 'accepted' | 'rejected') => void;
-  proposalDock?: ReactNode;
   lspEnabled?: boolean;
 }) {
   const editorRef = useRef<Monaco.editor.IStandaloneCodeEditor | null>(null);
@@ -786,7 +784,6 @@ export function EditorPane({
           accessibilitySupport: 'auto',
         }}
       />
-      {proposalDock}
       <span className="sr-only" role="status">
         {saveState === 'saved' ? 'Changes saved' : saveState}
       </span>
