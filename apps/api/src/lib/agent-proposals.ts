@@ -34,7 +34,15 @@ import {
 import type { Database, DatabaseTransaction } from '@latex-workshop/db';
 import type { AppContext } from './context.js';
 import { badRequest, conflict, HttpError, notFound, quotaExceeded } from './errors.js';
-import { acceptedCheckpointManifest, getFileWithBlob, requireProject, sha256 } from './domain.js';
+import {
+  createCheckpoint,
+  assertStorageQuota,
+  lockProjectHead,
+  acceptedCheckpointManifest,
+  getFileWithBlob,
+  requireProject,
+  sha256,
+} from './domain.js';
 import { createHistoryNode, ensureHistoryRoot } from '../routes/edit-history.js';
 import {
   assertProposalRevision,
@@ -228,6 +236,8 @@ export async function getAgentProjectTree(
   return {
     projectId,
     sourceRevision: project.sourceRevision,
+    compiler: project.compiler,
+    mainFilePath: project.mainFileId ? (paths.get(project.mainFileId) ?? null) : null,
     entries: rows.map((entry) => ({
       path: paths.get(entry.id) ?? entry.name,
       kind: entry.kind,
@@ -282,6 +292,7 @@ export async function startAgentProposal(
     .where(
       and(
         eq(agentProposals.projectId, input.projectId),
+        eq(agentProposals.directEdit, false),
         inArray(agentProposals.status, ['draft', 'needs_rebase', 'reviewing']),
       ),
     )
@@ -897,14 +908,16 @@ export async function finishAgentProposal(
     .filter(
       (change) =>
         (change.operation === 'create_file' || change.operation === 'replace_file') &&
-        !hunkChangeIds.has(change.id),
+        !hunkChangeIds.has(change.id) &&
+        !(proposal.directEdit && change.operation === 'create_file'),
     )
     .map((change) => change.id);
   const structuralCount = changes.filter(
     (change) =>
       change.operation === 'create_folder' ||
       change.operation === 'move' ||
-      change.operation === 'delete',
+      change.operation === 'delete' ||
+      (proposal.directEdit && change.operation === 'create_file'),
   ).length;
   const resolvedWithoutReview = !conflicts.length && frozen.length === 0 && structuralCount === 0;
   const revision = await context.db.transaction(async (tx) => {
@@ -1337,6 +1350,10 @@ async function acceptStructuralChange(
 ) {
   return context.db.transaction(async (tx) => {
     await tx.execute(
+      sql`select ${agentProposals.id} from ${agentProposals} where ${agentProposals.id} = ${proposal.id} for update`,
+    );
+    await lockProjectHead(tx, proposal.projectId);
+    await tx.execute(
       sql`select ${agentProposalChanges.id} from ${agentProposalChanges} where ${agentProposalChanges.id} = ${change.id} for update`,
     );
     const [lockedChange] = await tx
@@ -1421,7 +1438,7 @@ async function acceptTextHunk(
   change: typeof agentProposalChanges.$inferSelect,
   selected: typeof agentProposalHunks.$inferSelect,
 ): Promise<number | false> {
-  const historySummary = `Agent proposal: ${proposal.title} (${proposal.clientName})`;
+  const historySummary = `${proposal.directEdit ? 'Agent edit' : 'Agent proposal'}: ${proposal.title} (${proposal.clientName})`;
   const all = await context.db
     .select()
     .from(agentProposalHunks)
@@ -1457,6 +1474,10 @@ async function acceptTextHunk(
     const historyRootId = deterministicUuid(`${proposal.id}\0history-root\0${selected.id}`);
     await context.storage.put(objectKey, bytes, 'text/plain');
     const result = await context.db.transaction(async (tx) => {
+      await tx.execute(
+        sql`select ${agentProposals.id} from ${agentProposals} where ${agentProposals.id} = ${proposal.id} for update`,
+      );
+      await lockProjectHead(tx, proposal.projectId);
       await tx.execute(
         sql`select ${agentProposalHunks.id} from ${agentProposalHunks} where ${agentProposalHunks.id} = ${selected.id} for update`,
       );
@@ -1585,6 +1606,10 @@ async function strictStoreVersion(
   const objectKey = `blobs/${hash.slice(0, 2)}/${hash}`;
   await context.storage.put(objectKey, bytes, entry.mimeType ?? 'text/plain');
   return context.db.transaction(async (tx) => {
+    await tx.execute(
+      sql`select ${agentProposals.id} from ${agentProposals} where ${agentProposals.id} = ${proposalId} for update`,
+    );
+    await lockProjectHead(tx, entry.projectId);
     await tx.execute(
       sql`select ${agentProposalHunks.id} from ${agentProposalHunks} where ${agentProposalHunks.id} = ${clientMutationId} for update`,
     );
@@ -1716,6 +1741,7 @@ export async function acceptRemainingProposalItems(
   userId: string,
   proposalId: string,
   expectedRevision: number,
+  directEdit?: { expectedSourceRevision: number },
 ) {
   const proposal = await loadOwnedProposal(context, userId, proposalId);
   if (proposal.status !== 'reviewing') throw conflict('Proposal is not ready for review');
@@ -1744,7 +1770,14 @@ export async function acceptRemainingProposalItems(
     changes.some((change) => change.decision === 'conflicted')
   )
     throw conflict('Resolve or reject conflicted items before accepting all remaining');
-  if (!pendingHunks.length && !pendingStructures.length)
+  if (
+    !pendingHunks.length &&
+    !pendingStructures.length &&
+    !(
+      proposal.directEdit &&
+      changes.some((change) => change.operation === 'create_file' && change.decision === 'pending')
+    )
+  )
     return getAgentProposal(context, userId, proposalId);
 
   const textChanges = changes.filter(
@@ -1755,7 +1788,15 @@ export async function acceptRemainingProposalItems(
       const changeHunks = hunks.filter((hunk) => hunk.changeId === change.id);
       const accepted = changeHunks.filter((hunk) => hunk.decision === 'accepted');
       const remaining = changeHunks.filter((hunk) => hunk.decision === 'pending');
-      if (!remaining.length) return null;
+      if (
+        !remaining.length &&
+        !(
+          proposal.directEdit &&
+          change.operation === 'create_file' &&
+          change.decision === 'pending'
+        )
+      )
+        return null;
       const baseRows = change.baseVersionId
         ? await context.db
             .select({ blob: fileBlobs })
@@ -1783,7 +1824,7 @@ export async function acceptRemainingProposalItems(
     }),
   );
   const textUpdates = prepared.filter((item) => item !== null);
-  const historySummary = `Agent proposal: ${proposal.title} (${proposal.clientName})`;
+  const historySummary = `${proposal.directEdit ? 'Agent edit' : 'Agent proposal'}: ${proposal.title} (${proposal.clientName})`;
   const nextRevision = proposal.revision + 1;
 
   await context.db.transaction(async (tx) => {
@@ -1800,6 +1841,27 @@ export async function acceptRemainingProposalItems(
         proposalId,
         revision: locked?.revision ?? expectedRevision,
       });
+
+    await lockProjectHead(tx, proposal.projectId);
+    if (directEdit) {
+      const [head] = await tx
+        .select()
+        .from(projects)
+        .where(eq(projects.id, proposal.projectId))
+        .limit(1);
+      if (!head || head.sourceRevision !== directEdit.expectedSourceRevision)
+        throw conflict(
+          'Project changed. Refresh get_project_tree and read_text_file before retrying.',
+          { sourceRevision: head?.sourceRevision },
+        );
+      const deltaBytes = textUpdates.reduce(
+        (total, item) => total + item.bytes.byteLength - Buffer.byteLength(item.expectedContent),
+        0,
+      );
+      await assertStorageQuota(tx, context.config, userId, proposal.projectId, deltaBytes);
+      const safety = await createCheckpoint(tx, proposal.projectId, 'proposal');
+      await tx.update(checkpoints).set({ proposalId }).where(eq(checkpoints.id, safety.id));
+    }
 
     const creates = pendingStructures
       .filter((change) => change.operation === 'create_folder')
@@ -1992,7 +2054,7 @@ export async function acceptRemainingProposalItems(
     await tx.insert(auditEvents).values({
       userId,
       projectId: proposal.projectId,
-      action: 'agent_proposal.remaining_accepted',
+      action: proposal.directEdit ? 'agent_edit.applied' : 'agent_proposal.remaining_accepted',
       details: { proposalId, clientId: proposal.clientId, itemCount: appliedCount },
     });
   });
@@ -2601,5 +2663,13 @@ export async function reviseAgentProposalHunk(
 }
 
 async function publishProposal(context: AppContext, proposalId: string, revision: number) {
+  const [state] = await context.db
+    .select({ directEdit: agentProposals.directEdit, status: agentProposals.status })
+    .from(agentProposals)
+    .where(eq(agentProposals.id, proposalId))
+    .limit(1);
+  // Internal staging is invisible. One post-commit event refreshes the live editor,
+  // rather than a refetch storm for each file in a batch.
+  if (state?.directEdit && state.status !== 'resolved') return;
   await context.redis.publish('agent-proposal-events', JSON.stringify({ proposalId, revision }));
 }

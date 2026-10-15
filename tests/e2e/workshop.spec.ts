@@ -52,6 +52,44 @@ test('verified user creates, edits, persists, and compiles a project', async ({
   await expect(page).toHaveTitle(`${projectName} - Latex Workshop`);
   await expect(page.getByText('TexLab ready')).toBeVisible({ timeout: 30_000 });
 
+  const titleButton = page.getByRole('button', {
+    name: `Rename project ${projectName}`,
+    exact: true,
+  });
+  const titleInput = page.getByRole('textbox', { name: 'Project title', exact: true });
+  let titleWrites = 0;
+  page.on('request', (request) => {
+    if (request.method() === 'PATCH' && /\/api\/v1\/projects\/[^/]+$/.test(request.url()))
+      titleWrites += 1;
+  });
+  await titleButton.dblclick();
+  await expect(titleInput).toBeFocused();
+  await titleInput.fill('Cancelled by Escape');
+  await titleInput.press('Escape');
+  await expect(titleInput).toHaveCount(0);
+  await expect(titleButton).toBeVisible();
+  await titleButton.dblclick();
+  await titleInput.fill('Cancelled by clicking elsewhere');
+  await page.locator('.panel-header').first().click();
+  await expect(titleInput).toHaveCount(0);
+  await expect(titleButton).toBeVisible();
+  expect(titleWrites).toBe(0);
+  await titleButton.dblclick();
+  await titleInput.fill(`  ${projectName} renamed  `);
+  await titleInput.press('Enter');
+  await expect(page).toHaveTitle(`${projectName} renamed - Latex Workshop`);
+  await page.reload();
+  await expect(
+    page.getByRole('button', { name: `Rename project ${projectName} renamed`, exact: true }),
+  ).toBeVisible();
+  await expect(page).toHaveTitle(`${projectName} renamed - Latex Workshop`);
+  await page
+    .getByRole('button', { name: `Rename project ${projectName} renamed`, exact: true })
+    .dblclick();
+  await titleInput.fill(projectName);
+  await titleInput.press('Enter');
+  await expect(page).toHaveTitle(`${projectName} - Latex Workshop`);
+
   await page.getByLabel('Project settings').click();
   await expect(page.getByRole('dialog', { name: 'Project settings' })).toBeVisible();
   await page.getByRole('button', { name: 'Open profile' }).click();
@@ -309,8 +347,9 @@ test('verified user creates, edits, persists, and compiles a project', async ({
   const pdfPagePromise = page.context().waitForEvent('page');
   await page.getByLabel('Open PDF in new tab').click();
   const pdfPage = await pdfPagePromise;
+  await page.bringToFront();
   await expect(page.getByLabel('Show PDF preview')).toBeVisible();
-  await page.getByLabel('Show PDF preview').click();
+  await page.getByLabel('Show PDF preview').press('Enter');
   await expect(page.getByLabel('Hide PDF preview')).toBeVisible();
   await expect(pdfPage).toHaveTitle(`PDF - ${projectName} - Latex Workshop`);
   await pdfPage.close();

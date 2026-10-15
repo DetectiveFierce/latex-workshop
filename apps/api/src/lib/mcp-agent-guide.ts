@@ -1,72 +1,61 @@
 export const mindPalaceMcpServerName = 'Mind Palace LaTeX Workshop';
-export const mindPalaceMcpServerVersion = '0.5.1';
+export const mindPalaceMcpServerVersion = '0.6.0';
 export const mindPalaceEditingGuideUri = 'mind-palace://latex-workshop/agent-editing-guide';
-
 export const projectScopeRule =
-  'TOP-LEVEL SCOPE RULE: A project or template is a top-level Library item, never a .tex file or folder inside another project. If the user asks to create, make, or add a new project/template, you MUST call create_project. Do not use start_proposal, put_proposal_file, or propose_structure on the source project to create it. If the user asks to rename a project/template, you MUST call rename_project; propose_structure only renames entries inside a project.';
+  'TOP-LEVEL SCOPE RULE: A project or template is a top-level Library item, never a .tex file or folder inside another project. If the user asks to create, make, or add a new project/template, you MUST call create_project. Do not use start_proposal, put_proposal_file, or propose_structure on the source project to create it. If the user asks to rename a project/template, you MUST call rename_project; structure operations only rename entries inside a project.';
 
 export const mindPalaceMcpInstructions = `
-This interface accesses LaTeX Workshop projects on the user's Mind Palace site—not local folders and not the VS Code extension. For any related request, call list_projects first. Do not claim filesystem access is required.
+This interface accesses LaTeX Workshop projects on the user's Mind Palace site—not local folders and not the VS Code extension. Activate on LaTeX Workshop mentions or requests to edit/query a LaTeX file, including indirect follow-ups about an established file. No explicit skill invocation is required. Generic "check my proof" or math help alone does not activate Workshop. Read-only queries do not authorize unrelated edits. Honor explicit local-file or other-product choices. Call list_projects first; never guess ids. Do not claim filesystem access is required. The connection remains available throughout the conversation. Follow-ups like "the same paper" retain project context. Call list_projects again and refresh current site state.
 
-This connection remains available throughout the conversation. Treat follow-ups such as "also compile it", "that project", "the same paper", or "try again" as related when earlier context identified Mind Palace, even if the product name is omitted. Call list_projects again and continue with these tools; shorthand does not make the connection unavailable.
+Default workflow: get_project_tree → read_text_file → edit_project → compile_project → get_compile_page_images. Source edits are immediate and undoable; no owner review is required. edit_project takes complete files, their current baseHash (null for create-only), expectedSourceRevision from the fresh tree, a short title, and a fresh UUID idempotencyKey. It atomically applies files and structure and returns new hashes plus undoCheckpointId. For each subsequent edit reread affected live files, including owner changes; never reuse stale hashes. On conflict refresh and submit a new operation. Reuse a UUID only for an identical retry.
+
+The owner can undo file edits in Undo history or restore the pre-edit checkpoint in Version history. Proposal tools are optional: use them only for an explicit review-first request, then return reviewUrl. create_project seeds live source by default; reviewOnly=true requests review instead. Create in a folder with folderId, move with organize_library action move_project; folderId=null means Library root. Follow established folder/tag conventions.
 
 ${projectScopeRule}
 
-list_projects returns Library folders, tags, project folderId/tagIds, organizationComplete, and manageAccessUrl. Never guess ids. Create directly in a folder with create_project folderId. Move an existing project with organize_library action move_project, its projectId, and the destination folderId; folderId=null means Library root. These are top-level Library operations, not proposal structure edits. Refresh list_projects after changes. Read ${mindPalaceEditingGuideUri} before multi-step writes or when handling pagination, conflicts, compile failure, or owner handoff.
-
-For a new project, honor explicit placement or infer folder/tag conventions from similar projects; avoid speculative tags. Creation, renaming, and Library organization are immediate metadata operations. Source-tree changes use isolated proposals. finish_proposal compiles one revision for owner review. Return reviewUrl; only the owner can apply changes.
+For requests combining BU Semester courses and Workshop projects, call the separate BU Semester app for course evidence and this app for project files in the same response. Do not substitute one collection for the other. Missing projects: return manageAccessUrl. See ${mindPalaceEditingGuideUri} or get_editing_guide for full capabilities and examples.
 `.trim();
 
-export const mindPalaceEditingGuide = `# Editing a Mind Palace LaTeX Workshop project
+export const mindPalaceEditingGuide = `# Editing Mind Palace LaTeX Workshop
 
-## Meaning
+Projects are hosted on the user's Mind Palace site. This connection persists across messages. Activate on a mention of LaTeX Workshop or a request to edit or query a LaTeX file, including follow-ups about an established file. No explicit skill invocation is required. Generic proof checking or math help alone does not activate Workshop. Use the conversation to resolve the requested file, and read accessible metadata when needed. Keep writes within the user's requested work and honor explicit local-file or other-product choices. Read and write hosted files through these tools.
 
-"LaTeX Workshop project" means a project hosted in the user's private LaTeX Workshop on the Mind Palace site. It does not mean a repository directory or the similarly named VS Code extension.
-
-## Mandatory scope decision
+## Scope and capabilities
 
 ${projectScopeRule}
 
-| User intent | Correct tool scope | Required first write |
-| --- | --- | --- |
-| Create/add/make a new project | New top-level Library item | \`create_project\` with \`isTemplate=false\` |
-| Create/add/make a new template | New top-level Templates item | \`create_project\` with \`isTemplate=true\` |
-| Rename a project or template | Top-level metadata | \`rename_project\` |
-| Add/replace/rename a file or folder | Inside one existing project | \`start_proposal\`, then proposal tools |
-| Organize projects, Library folders, or tags | Top-level metadata | \`organize_library\` |
+- list_projects: accessible projects/templates, Library folders, tags, placement, capabilities, manageAccessUrl.
+- get_project_tree: current saved paths, sourceRevision, file hashes/versions and editable flags.
+- read_text_file: current UTF-8 source, including owner edits and prior agent edits. Follow nextOffset until null. Restart a paginated read if its hash changes.
+- edit_project: immediate atomic batch of full file contents and folder creation, moves, renames, deletions. No owner approval step. baseHash is required on every file: use its current read hash for replacement, null for create-only. expectedSourceRevision comes from the fresh tree. Conflicts change no accepted files.
+- compile_project: compile live saved source and return diagnostics/log. Failed builds preserve the last successful PDF. get_project_compile recovers a pending or interrupted wait by exact job id.
+- get_compile_page_images: inspect up to three pages of an exact successful compile. Use projectId for live project builds or proposalId for optional review builds.
+- create_project: new top-level project; omit sourceProjectId for blank source, or pass a granted template/project to copy. isTemplate=true creates a reusable template copied by value. Seeded source is live by default. Customize the NEW project with edit_project, never sourceProjectId. reviewOnly=true is only for explicit review-first requests.
+- rename_project: immediate top-level project/template rename.
+- organize_library: immediate folders, tags, project placement and tag assignments. action="move_project" with folderId=null moves to Library root. Refresh list_projects after organization changes. Honor explicit placement or established folder/tag conventions. Deleting a tag removes assignments; trashing a Library folder trashes its subtree and contained projects. Ungranted projects remain protected.
+- Optional review: start_proposal, put_proposal_file, propose_structure, get_proposal, compile_proposal, get_proposal_compile, finish_proposal. These keep source isolated until the owner accepts it.
 
-Do not translate “create a template” into “create a .tex file.” Do not translate “rename a project” into an entry move. A source project used for formatting is read-only reference material unless the user separately asks to edit that source project.
+## Repeated live editing
 
-## Fast, safe workflow
+1. Resolve the displayed project name with list_projects. If absent, provide manageAccessUrl; if ambiguous, ask which project.
+2. Read get_project_tree, then relevant read_text_file pages. Keep the current sourceRevision and every complete file's hash.
+3. Call edit_project with a short title, a fresh UUID, files=[{path, content, baseHash}], and optional structure operations. content is the complete desired file content. Folder creation must list parents before children. Keep a file write and a move/delete of that file or an ancestor in separate edits. Binary assets are listed but source editing supports only valid UTF-8 text and source-only folder subtrees. Limits: 2,000,000 UTF-8 bytes per file, 10,000,000 text bytes per batch, and 100 changed entries; read pages can request up to 256 KiB.
+4. Changes are live when applied=true. The response includes the current tree and undoCheckpointId. Call compile_project with the latest sourceRevision for output-affecting work; inspect warnings even when succeeded. If still running, call get_project_compile with its job id. Inspect PDF pages for layout-sensitive edits.
+5. Correct failures by rereading current files and making another edit_project call. On a follow-up such as "now update it" or "that project", resolve again and reread affected files. Owner changes are part of the current saved state; unsaved browser typing is not yet available to the agent.
 
-- **Templates** — a template is a normal editable project with \`isTemplate=true\`. It appears in the Templates library and is copied by value: later template edits do not alter projects already created from it.
-- **Create a blank project** — call \`create_project\` without \`sourceProjectId\` and with \`isTemplate=false\`.
-- **Create a project from a template** — resolve the template with \`list_projects\`, pass its id as \`sourceProjectId\`, and keep \`isTemplate=false\`.
-- **Place and tag a project** — inspect the folders, tags, and assignments returned by \`list_projects\`. Pass suitable existing \`folderId\` and \`tagIds\` to \`create_project\`. Honor explicit placement first; otherwise use the source/template or closely related projects as evidence. Prefer root/no tags when evidence is weak instead of inventing categories.
-- **Move an existing project** — call \`organize_library\` with \`action="move_project"\`, the granted \`projectId\`, and the destination Library \`folderId\`. Use \`folderId=null\` to move it to Library root. Then call \`list_projects\` again and verify the project's returned \`folderId\`. This changes placement metadata immediately and does not create a proposal.
-- **Create missing organization** — use \`organize_library\` first only when the user asked for that organization or the existing Library shows a clear convention, then call \`list_projects\` again and use the returned ids.
-- **Create a reusable template** — call \`create_project\` with \`isTemplate=true\`. To base it on the current project’s formatting, pass that project id as \`sourceProjectId\`; omit the source for the standard blank document.
-- **Customize a newly created item** — make further file changes in the proposal returned by \`create_project\`. That proposal’s \`projectId\` is the new item. Never start a proposal on \`sourceProjectId\` merely because its formatting was used as the reference.
-- **Creation review boundary** — project/template metadata exists immediately without confirmation, while every byte of seeded source is frozen in the returned \`reviewing\` proposal. The tool automatically waits for its compile and returns warnings/errors in \`compile\`. Source remains unaccepted until the owner accepts the hunks.
-- **Rename** — call \`rename_project\` without asking for confirmation. This changes only project metadata and does not use a proposal.
-- **Library organization** — \`organize_library\` immediately creates, renames, moves, or trashes Library folders; creates, renames, or deletes tags; moves projects between folders or to root; and replaces a project's complete tag set. These are top-level document operations, unlike source-tree changes made with \`propose_structure\`. Moving a project requires \`action="move_project"\`; never model it as moving a \`.tex\` file or source folder. Explain before trashing a folder that its subtree and contained projects go to Trash, and before deleting a tag that its assignments are removed. The tool refuses destructive changes that touch ungranted projects.
+Example: read main.tex with hash H at sourceRevision R, then edit_project({projectId, expectedSourceRevision:R, title:"Revise introduction", idempotencyKey:NEW_UUID, files:[{path:"main.tex", baseHash:H, content:COMPLETE_TEXT}]}). Next time, read the current main.tex again and use its NEW hash and the latest tree revision.
 
-1. **Resolve** — call \`list_projects\`, choose the granted project by its displayed name, and retain its id. Never guess an id. If the project is absent, give the user the returned \`manageAccessUrl\` so they can grant it under **Account settings → Agent access**.
-2. **Inspect** — call \`get_project_tree\`; read the relevant editable files with \`read_text_file\`. Continue paged reads while \`nextOffset\` is not null. Keep the returned hash for every existing file you may change.
-3. **Draft** — call \`start_proposal\`. It returns the existing active proposal for this client when one already exists, so inspect its title, status, revision, and changes before continuing.
-4. **Implement** — call \`put_proposal_file\` with the complete desired file content. Include \`baseHash\` when replacing an accepted file. Use \`propose_structure\` for source-only folders, moves, renames, and deletions. Chain every write from the latest returned \`revision\`, and generate a new UUID \`idempotencyKey\` for each distinct operation.
-5. **Submit and verify** — call \`finish_proposal\` with the latest revision. It freezes the review, automatically compiles that exact review revision, waits for the result, and returns the complete compile job in \`compile\`. Inspect all diagnostics even when status is \`succeeded\`, because successful LaTeX builds may contain warnings. For visual or layout-sensitive work, call \`get_compile_page_images\` with the proposal id, exact succeeded compile job id, and up to three one-based page numbers per request; inspect additional pages in further calls. If compilation fails or a rendered page exposes a defect, revise the proposal and finish again. \`reviewing\` means the owner can inspect and accept/reject hunks; it does not mean source was accepted.
-6. **Recovery and optional preflight** — \`compile_proposal\` explicitly compiles a draft and waits for the job in the same response. \`get_proposal_compile\` is only a recovery path after an interrupted or unusually long request; do not routinely poll it.
+## Undo and retries
 
-## Revision and conflict rules
+Each applied edit saves a pre-edit project checkpoint and adds labeled file Undo history. The owner can use Undo history for one file, or Version history → Before agent edit → Restore checkpoint for the complete file/folder state. Restoration creates new state; it does not erase history. Whole-project restoration also replaces later saved changes, so use file history when later work should be retained. Checkpoints are retained for 30 days.
 
-- \`expectedProposalRevision\` is compare-and-swap protection. Always take it from the immediately preceding proposal response.
-- Reuse an idempotency key only when retrying the exact same operation after an uncertain transport result.
-- \`needs_rebase\` means accepted source changed after the draft was based. Reread each path in \`conflicts\`, reconstruct the desired complete file with its current hash, write it again, recompile, and finish again.
-- A write to a proposal already in \`reviewing\` reopens it as \`draft\`; finish the revised version again and inspect its automatically returned compile.
-- Only the owner can apply a proposal. Link the \`reviewUrl\` returned by \`finish_proposal\` and tell the user to use the Mind Palace proposal review controls to accept the desired hunks.
+An identical transport retry uses the SAME idempotencyKey and does not apply twice, even after the owner undoes it. A different edit uses a NEW UUID. A stale revision/hash conflict requires rereading the current tree and files, reconstructing the intended change against them, and submitting a fresh key. Never bypass a conflict with null: null only creates a missing file.
+
+## Optional proposal review
+
+Only use this workflow when the user explicitly asks for review before applying. start_proposal returns a durable review draft. put_proposal_file uses complete desired file content and baseHash; propose_structure changes only project entries. Chain expectedProposalRevision from each response and generate a fresh mutation UUID. finish_proposal automatically compiles its frozen revision; inspect diagnostics, correct failures, and finish again. get_proposal_compile recovers interrupted waits; do not routinely poll completed jobs. needs_rebase means reread conflicts and rewrite using current hashes. A reviewing proposal is ready for the owner, not live: Only the owner can apply a proposal using its reviewUrl.
 `;
 
 export function editLatexWorkshopProjectPrompt(project: string, change: string) {
-  return `Edit the Mind Palace LaTeX Workshop project named "${project}" to make this change:\n\n${change}\n\nUse only the connected Mind Palace LaTeX Workshop tools for the project. Resolve it with list_projects, inspect its tree and relevant source, implement the complete change in an isolated proposal, compile and correct it when output may be affected, then finish the proposal for owner review and give the user its reviewUrl. Do not modify local files as a substitute, do not claim filesystem access is required, and do not claim the change is accepted before the owner accepts it on the site.`;
+  return `Edit the Mind Palace LaTeX Workshop project named "${project}" to make this change:\n\n${change}\n\nUse the connected Mind Palace LaTeX Workshop tools. Resolve with list_projects, inspect get_project_tree and current read_text_file contents, then apply complete changes with edit_project. Compile with compile_project, inspect diagnostics, and correct errors. Refresh current files for each subsequent edit. Undo is available in Mind Palace. Use optional proposals only if explicitly asked to review first. Do not modify local files as a substitute and do not claim filesystem access is required.`;
 }

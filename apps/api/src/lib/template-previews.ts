@@ -1,8 +1,9 @@
-import { and, desc, eq, inArray, isNotNull, isNull, sql } from 'drizzle-orm';
+import { and, desc, eq, gt, inArray, isNotNull, isNull, sql } from 'drizzle-orm';
 import { compileJobs, projects } from '@latex-workshop/db';
 import type { AppContext } from './context.js';
-import { createCheckpoint } from './domain.js';
+import { createCheckpoint, lockProjectHead } from './domain.js';
 import { incrementMetric } from './operational-metrics.js';
+import { PREVIEW_RETRY_MS } from './project-previews.js';
 
 const scheduled = new Map<string, ReturnType<typeof setTimeout>>();
 
@@ -19,11 +20,12 @@ export function scheduleTemplatePreview(context: AppContext, projectId: string, 
   scheduled.set(projectId, timer);
 }
 
-async function queueTemplatePreview(context: AppContext, projectId: string) {
+export async function queueTemplatePreview(context: AppContext, projectId: string) {
   const result = await context.db.transaction(async (tx) => {
     await tx.execute(
       sql`select pg_advisory_xact_lock(hashtext(${'template-preview:' + projectId}))`,
     );
+    await lockProjectHead(tx, projectId);
     const [project] = await tx.select().from(projects).where(eq(projects.id, projectId)).limit(1);
     if (!project?.isTemplate || project.trashedAt || !project.mainFileId)
       return { kind: 'current' } as const;
@@ -34,6 +36,7 @@ async function queueTemplatePreview(context: AppContext, projectId: string) {
       .where(
         and(
           eq(compileJobs.projectId, projectId),
+          eq(compileJobs.target, 'accepted'),
           eq(compileJobs.sourceRevision, project.sourceRevision),
           eq(compileJobs.engine, project.compiler),
           eq(compileJobs.status, 'succeeded'),
@@ -57,6 +60,22 @@ async function queueTemplatePreview(context: AppContext, projectId: string) {
       .limit(1);
     if (active) return { kind: 'retry' } as const;
 
+    const [recentFailure] = await tx
+      .select({ id: compileJobs.id })
+      .from(compileJobs)
+      .where(
+        and(
+          eq(compileJobs.projectId, projectId),
+          eq(compileJobs.target, 'accepted'),
+          eq(compileJobs.sourceRevision, project.sourceRevision),
+          eq(compileJobs.engine, project.compiler),
+          inArray(compileJobs.status, ['failed', 'cancelled']),
+          gt(compileJobs.createdAt, new Date(Date.now() - PREVIEW_RETRY_MS)),
+        ),
+      )
+      .limit(1);
+    if (recentFailure) return { kind: 'current' } as const;
+
     const checkpoint = await createCheckpoint(tx, projectId, 'compile');
     const [job] = await tx
       .insert(compileJobs)
@@ -68,7 +87,8 @@ async function queueTemplatePreview(context: AppContext, projectId: string) {
         trigger: 'auto',
       })
       .returning();
-    return { kind: 'queued', job: job! } as const;
+    if (!job) throw new Error('Template preview compilation was not created');
+    return { kind: 'queued', job } as const;
   });
 
   if (result.kind === 'retry') {
@@ -76,16 +96,28 @@ async function queueTemplatePreview(context: AppContext, projectId: string) {
     return;
   }
   if (result.kind !== 'queued') return;
-  await context.queue.add(
-    'compile',
-    { compileJobId: result.job.id },
-    {
-      jobId: result.job.id,
-      attempts: 2,
-      backoff: { type: 'fixed', delay: 1_000 },
-      removeOnComplete: 500,
-      removeOnFail: 500,
-    },
-  );
+  try {
+    await context.queue.add(
+      'compile',
+      { compileJobId: result.job.id },
+      {
+        jobId: result.job.id,
+        attempts: 2,
+        backoff: { type: 'fixed', delay: 1_000 },
+        removeOnComplete: 500,
+        removeOnFail: 500,
+      },
+    );
+  } catch (error) {
+    await context.db
+      .update(compileJobs)
+      .set({
+        status: 'failed',
+        finishedAt: new Date(),
+        log: 'Template preview could not be queued',
+      })
+      .where(eq(compileJobs.id, result.job.id));
+    throw error;
+  }
   incrementMetric('latex_template_preview_queue_total', { status: 'queued' });
 }

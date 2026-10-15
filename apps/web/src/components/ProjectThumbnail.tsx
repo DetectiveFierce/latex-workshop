@@ -76,7 +76,7 @@ export function ProjectThumbnail({
     <div ref={hostRef} className={`project-thumbnail${loaded ? ' loaded' : ''}`}>
       <div className="project-thumbnail-placeholder">
         <FileCode2 size={32} />
-        <span>{jobId ? 'Loading preview…' : 'Compile to create a preview'}</span>
+        <span>{jobId ? 'Loading preview…' : 'Preview pending'}</span>
       </div>
       {jobId && <canvas ref={canvasRef} aria-hidden="true" />}
     </div>

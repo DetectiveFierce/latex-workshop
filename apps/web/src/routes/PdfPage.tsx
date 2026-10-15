@@ -39,6 +39,7 @@ export default function PdfPage() {
     <main style={{ height: '100%' }}>
       <PdfViewer
         url={url}
+        {...(project.data ? { downloadFilename: `${project.data.project.name}.pdf` } : {})}
         downloadUrl={appPath(`/api/v1/projects/${projectId}/compilations/${jobId}/download`)}
       />
     </main>

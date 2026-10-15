@@ -61,7 +61,7 @@ describe('MCP transport compatibility', () => {
       const message = initializeResponseSchema.parse(JSON.parse(data ?? 'null'));
       expect(message.result.protocolVersion).toBe('2025-06-18');
       expect(message.result.serverInfo.name).toBe('Mind Palace LaTeX Workshop');
-      expect(message.result.serverInfo.version).toBe('0.5.1');
+      expect(message.result.serverInfo.version).toBe(mindPalaceMcpServerVersion);
       expect(message.result.instructions).toContain('Mind Palace site');
     } finally {
       await handler.close();

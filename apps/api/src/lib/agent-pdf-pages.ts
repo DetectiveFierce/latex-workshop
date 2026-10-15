@@ -8,6 +8,7 @@ import {
 } from '@latex-workshop/contracts';
 import type { AppContext } from './context.js';
 import { conflict } from './errors.js';
+import { getAgentProjectPdfArtifact } from './agent-compiles.js';
 import { getAgentProposalPdfArtifact } from './agent-proposals.js';
 
 type AgentIdentity = { userId: string; clientId: string; clientName: string };
@@ -18,12 +19,14 @@ export async function renderAgentProposalPdfPages(
   input: AgentPdfPageRequest,
   signal?: AbortSignal,
 ) {
-  const artifact = await getAgentProposalPdfArtifact(
-    context,
-    identity,
-    input.proposalId,
-    input.compileJobId,
-  );
+  const artifact = input.proposalId
+    ? await getAgentProposalPdfArtifact(context, identity, input.proposalId, input.compileJobId)
+    : await getAgentProjectPdfArtifact(
+        context,
+        identity,
+        input.projectId ?? '',
+        input.compileJobId,
+      );
   const renderRequestId = randomUUID();
   const key = pdfPageRenderRequestKey(renderRequestId);
   const pages = [...input.pages].sort((left, right) => left - right);

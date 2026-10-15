@@ -335,6 +335,7 @@ export async function registerAgentProposalRoutes(app: FastifyInstance, context:
       .where(
         and(
           eq(agentProposals.projectId, projectId),
+          eq(agentProposals.directEdit, false),
           inArray(agentProposals.status, ['draft', 'needs_rebase', 'reviewing']),
         ),
       )

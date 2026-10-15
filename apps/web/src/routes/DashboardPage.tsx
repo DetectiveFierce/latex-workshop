@@ -168,11 +168,20 @@ export function DashboardPage() {
     queryKey: queryKeys.library(trash),
     queryFn: () => api<LibraryResponse>(`/api/v1/library?trash=${trash}`),
     enabled: Boolean(session?.user),
+    refetchInterval: (query) =>
+      !trash &&
+      query.state.data?.projects.some((project) => project.mainFileId && !project.previewJobId)
+        ? 10_000
+        : false,
   });
   const templates = useQuery({
     queryKey: queryKeys.templates,
     queryFn: () => api<TemplateListResponse>('/api/v1/templates'),
     enabled: Boolean(session?.user),
+    refetchInterval: (query) =>
+      query.state.data?.templates.some((project) => project.mainFileId && !project.previewJobId)
+        ? 10_000
+        : false,
   });
   const data = library.data;
   const templateProjects = useMemo(

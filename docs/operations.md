@@ -58,6 +58,13 @@ Only workers should reach the container runtime. Prefer a rootless, socket-proxi
 
 The API maintenance leader uses a Redis lease to create five-minute dirty checkpoints and purge expired trash, history, job records, old versions, and unreferenced blobs. S3 lifecycle rules should be a safety net with a longer window than application retention, not an independent early delete.
 
+The latest successful accepted build and its checkpoint/artifacts remain available for each project
+until replaced by a newer successful build or the project is permanently deleted. This keeps
+Library thumbnails and the last successful PDF available beyond the 30-day history window.
+Maintenance queues at most one missing Library preview per minute when the compile queue is idle,
+using low-priority automatic builds after a minute without edits. Templates are included. Failed
+source revisions retry after 24 hours; saving a new revision makes the project eligible again.
+
 ## Release and rollback
 
 Before release, require formatting, lint, typecheck, unit/integration tests, production builds, migration validation, container builds, real three-engine fixture compiles, browser E2E, license review, and an isolation probe. Database migrations are forward-only. Roll back application images only when they remain compatible with the migrated schema; otherwise deploy a corrective migration and forward fix.

@@ -345,13 +345,16 @@ compose=(docker compose --env-file "$env_file" -f "$deploy_root/current/infra/co
 "${compose[@]}" up -d postgres redis minio mailpit minio-init </dev/null
 migration_started=true
 "${compose[@]}" run --rm -T --interactive=false migrate </dev/null
-"${compose[@]}" up -d --wait --wait-timeout 180 \
-  api language-service compile-worker web </dev/null
+application_services=(api language-service compile-worker web)
+if grep -Eq '^AGENT_MCP_TAILNET_KEY=[a-f0-9]{64}$' "$env_file"; then
+  application_services+=(tailnet-mcp)
+fi
+"${compose[@]}" up -d --wait --wait-timeout 180 "${application_services[@]}" </dev/null
 
-for service in api language-service compile-worker web; do
+for service in "${application_services[@]}"; do
   container_id=$("${compose[@]}" ps -q "$service" </dev/null)
   image=$(docker inspect --format '{{.Config.Image}}' "$container_id")
-  if [[ $service == web ]]; then
+  if [[ $service == web || $service == tailnet-mcp ]]; then
     expected_image="latex-workshop-web:$release_id"
   else
     expected_image="latex-workshop-services:$release_id"
@@ -366,6 +369,21 @@ ca=/home/mind-palace/services/mind-palace-platform/trust/mind-palace-root.crt
 curl --fail --silent --show-error --retry 6 --retry-delay 2 --cacert "$ca" \
   --resolve mind-palace:8443:127.0.0.1 \
   https://mind-palace:8443/latex-workshop/health/live >/dev/null
+
+if [[ " ${application_services[*]} " == *' tailnet-mcp '* ]]; then
+  # Add a dedicated identity-aware listener; never reset the existing Serve routes.
+  curl --fail --silent --show-error http://127.0.0.1:8089/health/live >/dev/null
+  tailscale serve --https=9443 --bg http://127.0.0.1:8089 </dev/null
+  tailnet_name=$(tailscale status --json | python3 -c 'import json,sys; print(json.load(sys.stdin)["Self"]["DNSName"].rstrip("."))')
+  curl --fail --silent --show-error --retry 3 "https://$tailnet_name:9443/health/live" >/dev/null
+fi
+if grep -Eq '^AGENT_MCP_TUNNEL_KEY=[a-f0-9]{64}$' "$env_file"; then
+  tunnel_root=/home/mind-palace/services/openai-mcp-tunnel
+  test -s "$deploy_root/runtime/tunnel-mcp-key"
+  install -m 644 "$release_dir/infra/openai-mcp-tunnel/compose.private.yml" "$tunnel_root/compose.private.yml"
+  docker compose -f "$tunnel_root/compose.yml" -f "$tunnel_root/compose.private.yml" \
+    --env-file "$tunnel_root/.env" up -d --wait --wait-timeout 120 </dev/null
+fi
 
 trap - ERR
 "${compose[@]}" rm -f minio-init texlive-image </dev/null

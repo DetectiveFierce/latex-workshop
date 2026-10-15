@@ -11,6 +11,7 @@ import { z } from 'zod';
 import { loadConfig, trustedWebOrigins } from '@latex-workshop/config';
 import { buildOpenApiDocument } from '@latex-workshop/contracts';
 import { createContext } from './lib/context.js';
+import { isPrivateOAuthDiscovery } from './lib/tailnet-auth.js';
 import { HttpError } from './lib/errors.js';
 import { serializeAuthProxyBody } from './lib/auth-proxy-body.js';
 import { codexCompatibleAuthorizationMetadata } from './lib/oauth-metadata-compat.js';
@@ -42,7 +43,13 @@ export async function buildServer() {
   const app = Fastify({
     logger: {
       level: config.NODE_ENV === 'development' ? 'debug' : 'info',
-      redact: ['req.headers.authorization', 'req.headers.cookie', 'res.headers.set-cookie'],
+      redact: [
+        'req.headers.authorization',
+        'req.headers.cookie',
+        'req.headers.x-workshop-tailnet-key',
+        'req.headers.x-workshop-tunnel-key',
+        'res.headers.set-cookie',
+      ],
     },
     bodyLimit: config.MAX_FILE_BYTES,
     trustProxy: config.NODE_ENV === 'production',
@@ -100,6 +107,10 @@ export async function buildServer() {
     // Better Auth expects, especially OAuth's required form-encoded token requests.
     headers.delete('content-length');
     const incomingUrl = request.raw.url ?? '/';
+    // The owner's private tunnel has already authenticated the transport. Advertising
+    // OAuth here makes hosts start an unnecessary user reconnect flow during discovery.
+    if (isPrivateOAuthDiscovery(config, headers, incomingUrl))
+      return reply.code(404).send({ error: 'User OAuth is not required for private transport' });
     const publicUrl = incomingUrl.startsWith('/.well-known/')
       ? publicWellKnownUrl(
           config.API_ORIGIN,
@@ -117,6 +128,20 @@ export async function buildServer() {
         ...(body === undefined ? {} : { body }),
       }),
     );
+    if (incomingUrl.startsWith('/api/auth/oauth2/authorize')) {
+      const location = response.headers.get('location');
+      if (location) {
+        const redirect = new URL(location, publicUrl);
+        request.log.info(
+          {
+            oauthRedirectOrigin: redirect.origin,
+            oauthRedirectPath: redirect.pathname,
+            oauthStatus: response.status,
+          },
+          'OAuth authorization redirect',
+        );
+      }
+    }
     reply.code(response.status);
     for (const [key, value] of response.headers.entries())
       if (key !== 'set-cookie') reply.header(key, value);

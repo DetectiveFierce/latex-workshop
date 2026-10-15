@@ -38,4 +38,10 @@ describe('mcpToolMetadata', () => {
       openWorldHint: false,
     });
   });
+  it('advertises no user OAuth only after private transport authentication', () => {
+    expect(mcpToolMetadata('write', undefined, 'private')._meta.securitySchemes).toEqual([
+      { type: 'noauth' },
+    ]);
+    expect(mcpToolMetadata('write')._meta.securitySchemes[0]?.type).toBe('oauth2');
+  });
 });

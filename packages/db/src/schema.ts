@@ -440,6 +440,8 @@ export const agentProposals = pgTable(
     clientId: text('client_id').notNull(),
     clientName: text('client_name').notNull(),
     title: text('title').notNull(),
+    directEdit: boolean('direct_edit').notNull().default(false),
+    requestHash: text('request_hash'),
     status: agentProposalStatusEnum('status').notNull().default('draft'),
     revision: integer('revision').notNull().default(0),
     totalBytes: bigint('total_bytes', { mode: 'number' }).notNull().default(0),
@@ -453,7 +455,9 @@ export const agentProposals = pgTable(
     index('agent_proposals_owner_idx').on(table.userId, table.clientId),
     uniqueIndex('agent_proposals_one_unresolved_idx')
       .on(table.projectId)
-      .where(sql`${table.status} in ('draft', 'needs_rebase', 'reviewing')`),
+      .where(
+        sql`${table.directEdit} = false and ${table.status} in ('draft', 'needs_rebase', 'reviewing')`,
+      ),
   ],
 );
 
@@ -688,6 +692,8 @@ export const checkpoints = pgTable(
     proposalId: uuid('proposal_id').references(() => agentProposals.id, { onDelete: 'set null' }),
     proposalRevision: integer('proposal_revision'),
     manifest: jsonb('manifest').$type<CheckpointManifestEntry[]>().notNull(),
+    folderPaths: text('folder_paths').array().notNull().default([]),
+    mainFilePath: text('main_file_path'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [index('checkpoints_project_created_idx').on(table.projectId, table.createdAt)],

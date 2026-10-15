@@ -1,7 +1,7 @@
 {
   "name": "latex-workshop",
-  "version": "1.0.0+codex.20260914234202",
-  "description": "Organize, create, edit, compile, tag, and review private Mind Palace LaTeX Workshop projects.",
+  "version": "1.1.0+codex.20261002000000",
+  "description": "Read, edit, and compile Mind Palace LaTeX projects on Workshop mentions or LaTeX file requests.",
   "author": {
     "name": "Mind Palace"
   },
@@ -9,7 +9,7 @@
   "interface": {
     "displayName": "LaTeX Workshop",
     "shortDescription": "Organize, edit, and compile private LaTeX projects.",
-    "longDescription": "Organize folders and tags, place projects intelligently, and edit site-hosted LaTeX Workshop projects from ChatGPT or Codex through project-scoped access and reviewable, compiled proposals.",
+    "longDescription": "Organize folders and tags, place projects intelligently, and edit site-hosted LaTeX Workshop projects from ChatGPT or Codex through project-scoped access, immediate atomic edits with undo, live compilation, and optional review proposals. Select automatically on Workshop mentions or LaTeX file editing/querying requests, including follow-ups. Generic proof checking alone does not activate it.",
     "developerName": "Mind Palace",
     "category": "Productivity",
     "capabilities": ["Read", "Write", "Organize"],

@@ -1,0 +1,9 @@
+# Opt-in service authentication for this owner's private tunnel. Keep the base
+# tunnel's workspace association, audience, control-plane credential, and URL.
+services:
+  tunnel-client:
+    environment:
+      MCP_EXTRA_HEADERS: 'X-Workshop-Tunnel-Key: file:/run/secrets/private_mcp_key'
+      MCP_DISCOVERY_EXTRA_HEADERS: 'X-Workshop-Tunnel-Key: file:/run/secrets/private_mcp_key'
+    volumes:
+      - /home/mind-palace/services/latex-workshop/runtime/tunnel-mcp-key:/run/secrets/private_mcp_key:ro

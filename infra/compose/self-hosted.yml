@@ -180,7 +180,11 @@ services:
     <<: *app-security
     image: ${SERVICE_IMAGE:?set SERVICE_IMAGE}
     command: [node, apps/api/dist/server.js]
-    environment: *runtime-env
+    environment:
+      <<: *runtime-env
+      AGENT_MCP_TAILNET_KEY: ${AGENT_MCP_TAILNET_KEY:-}
+      AGENT_MCP_TUNNEL_KEY: ${AGENT_MCP_TUNNEL_KEY:-}
+      AGENT_MCP_PRIVATE_OWNER_EMAIL: ${AGENT_MCP_PRIVATE_OWNER_EMAIL:-}
     restart: unless-stopped
     depends_on:
       postgres:
@@ -303,6 +307,32 @@ services:
         aliases: [latex-workshop-web]
     logging: *default-logging
 
+  # Only tailscaled on the host can reach this identity-header ingress.
+  tailnet-mcp:
+    profiles: [private-mcp]
+    image: ${WEB_IMAGE:?set WEB_IMAGE}
+    restart: unless-stopped
+    entrypoint: [/bin/sh, -ec]
+    command:
+      - |
+        envsubst '$${AGENT_MCP_TAILNET_KEY}' < /etc/nginx/tailnet-mcp.conf.template > /tmp/tailnet-mcp.conf
+        exec nginx -c /tmp/tailnet-mcp.conf -g 'daemon off;'
+    environment:
+      AGENT_MCP_TAILNET_KEY: ${AGENT_MCP_TAILNET_KEY:-}
+    read_only: true
+    tmpfs: [/tmp, /var/cache/nginx, /var/run]
+    ports: ['127.0.0.1:8089:8089']
+    networks: [backend, tailnet-ingress]
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: [CMD, wget, -qO-, http://127.0.0.1:8089/health/live]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+    logging: *default-logging
+
   minio-backup:
     image: minio/mc@sha256:eb4ea9884b77704230e2423e9004d2fa738dc272876b9cc41a297d29443b8780
     profiles: [tools]
@@ -325,6 +355,8 @@ networks:
   backend:
     name: latex-workshop-backend
     internal: true
+  tailnet-ingress:
+    name: latex-workshop-tailnet-ingress
   oauth-egress:
     name: latex-workshop-oauth-egress
   edge:

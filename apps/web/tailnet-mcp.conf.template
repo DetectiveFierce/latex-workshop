@@ -1,0 +1,32 @@
+worker_processes auto;
+pid /var/run/nginx.pid;
+error_log /dev/stderr warn;
+events { worker_connections 1024; }
+http {
+  access_log off;
+  client_body_temp_path /tmp/client_body;
+  proxy_temp_path /tmp/proxy;
+  resolver 127.0.0.11 valid=10s ipv6=off;
+  server {
+    listen 8089;
+    server_name _;
+    location = /health/live { return 200 'ok'; }
+    location = /api/mcp {
+      client_max_body_size 200m;
+      set $api_upstream http://latex-workshop-api-1:3001;
+      proxy_pass $api_upstream/api/mcp/private;
+      proxy_http_version 1.1;
+      # Serve removes client-supplied identity headers and supplies the peer identity.
+      # This listener is published on host loopback only and is never routed by Caddy.
+      proxy_set_header Tailscale-User-Login $http_tailscale_user_login;
+      proxy_set_header X-Workshop-Tailnet-Key "${AGENT_MCP_TAILNET_KEY}";
+      proxy_set_header Authorization "";
+      proxy_set_header Cookie "";
+      proxy_set_header Host $host;
+      proxy_buffering off;
+      proxy_read_timeout 900s;
+      proxy_send_timeout 900s;
+    }
+    location / { return 404; }
+  }
+}

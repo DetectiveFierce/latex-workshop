@@ -116,4 +116,29 @@ describe('loadConfig', () => {
   ])('rejects invalid bounded integer configuration for %s', (key, value) => {
     expect(() => loadConfig({ ...base, [key]: value })).toThrow();
   });
+  it('requires explicit private credentials and a verified-account mapping together', () => {
+    const privateConfig = {
+      ...base,
+      AGENT_MCP_ENABLED: 'true',
+      AGENT_MCP_RESOURCE_URL: 'https://workshop.example.com/api/mcp',
+      AGENT_MCP_PRIVATE_OWNER_EMAIL: 'owner@example.com',
+      AGENT_MCP_TAILNET_KEY: 'a'.repeat(64),
+      AGENT_MCP_TUNNEL_KEY: 'b'.repeat(64),
+    };
+    expect(loadConfig(privateConfig).AGENT_MCP_PRIVATE_OWNER_EMAIL).toBe('owner@example.com');
+    expect(() => loadConfig({ ...privateConfig, AGENT_MCP_TAILNET_KEY: 'invalid' })).toThrow();
+    expect(() => loadConfig({ ...privateConfig, AGENT_MCP_PRIVATE_OWNER_EMAIL: '' })).toThrow();
+    expect(() => loadConfig({ ...privateConfig, AGENT_MCP_ENABLED: 'false' })).toThrow();
+    expect(() =>
+      loadConfig({ ...base, AGENT_MCP_PRIVATE_OWNER_EMAIL: 'owner@example.com' }),
+    ).toThrow();
+    expect(
+      loadConfig({
+        ...base,
+        AGENT_MCP_TUNNEL_KEY: '',
+        AGENT_MCP_TAILNET_KEY: '',
+        AGENT_MCP_PRIVATE_OWNER_EMAIL: '',
+      }).AGENT_MCP_TUNNEL_KEY,
+    ).toBeUndefined();
+  });
 });

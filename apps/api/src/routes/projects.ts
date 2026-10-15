@@ -24,7 +24,6 @@ import type { AppContext } from '../lib/context.js';
 import { requireUser } from '../lib/context.js';
 import {
   assertStorageQuota,
-  buildEntryPaths,
   getFileWithBlob,
   requireProject,
   requireLibraryFolder,
@@ -32,6 +31,7 @@ import {
   storeFileVersion,
 } from '../lib/domain.js';
 import { cloneProjectHead, createBlankProject } from '../lib/project-creation.js';
+import { orderEntriesForDuplication } from '../lib/entry-duplication.js';
 import { badRequest, conflict, notFound, quotaExceeded } from '../lib/errors.js';
 
 function publicProject(project: typeof projects.$inferSelect) {
@@ -87,6 +87,7 @@ export async function registerProjectRoutes(app: FastifyInstance, context: AppCo
           .where(
             and(
               inArray(compileJobs.projectId, projectIds),
+              eq(compileJobs.target, 'accepted'),
               eq(compileJobs.status, 'succeeded'),
               isNotNull(compileJobs.pdfObjectKey),
             ),
@@ -439,11 +440,7 @@ export async function registerProjectRoutes(app: FastifyInstance, context: AppCo
         .map((entry) => entry.name.toLocaleLowerCase()),
     );
     const copyName = nextCopyName(source.name, siblings);
-    const paths = buildEntryPaths(subtree);
-    const ordered = [...subtree].sort(
-      (left, right) =>
-        paths.get(left.id)!.split('/').length - paths.get(right.id)!.split('/').length,
-    );
+    const ordered = orderEntriesForDuplication(all, subtreeIds);
 
     const duplicated = await context.db.transaction(async (tx) => {
       const idMap = new Map<string, string>();

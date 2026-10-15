@@ -1,6 +1,7 @@
 import { and, desc, eq, sql } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import {
+  agentProposals,
   auditEvents,
   checkpoints,
   entries,
@@ -10,7 +11,12 @@ import {
 } from '@latex-workshop/db';
 import type { AppContext } from '../lib/context.js';
 import { requireUser } from '../lib/context.js';
-import { buildEntryPaths, createCheckpoint, requireProject } from '../lib/domain.js';
+import {
+  buildEntryPaths,
+  createCheckpoint,
+  requireProject,
+  lockProjectHead,
+} from '../lib/domain.js';
 import { badRequest, notFound } from '../lib/errors.js';
 
 export async function registerHistoryRoutes(app: FastifyInstance, context: AppContext) {
@@ -25,8 +31,10 @@ export async function registerHistoryRoutes(app: FastifyInstance, context: AppCo
         sourceRevision: checkpoints.sourceRevision,
         reason: checkpoints.reason,
         createdAt: checkpoints.createdAt,
+        label: agentProposals.title,
       })
       .from(checkpoints)
+      .leftJoin(agentProposals, eq(agentProposals.id, checkpoints.proposalId))
       .where(and(eq(checkpoints.projectId, projectId), eq(checkpoints.target, 'accepted')))
       .orderBy(desc(checkpoints.createdAt));
     return { checkpoints: rows.map((row) => ({ ...row, createdAt: row.createdAt.toISOString() })) };
@@ -139,8 +147,11 @@ export async function registerHistoryRoutes(app: FastifyInstance, context: AppCo
       .from(entries)
       .where(eq(entries.projectId, projectId));
     const oldPaths = buildEntryPaths(oldEntries);
-    const mainPath = project.mainFileId ? oldPaths.get(project.mainFileId) : 'main.tex';
+    const mainPath =
+      checkpoint.mainFilePath ??
+      (project.mainFileId ? oldPaths.get(project.mainFileId) : 'main.tex');
     await context.db.transaction(async (tx) => {
+      await lockProjectHead(tx, projectId);
       await tx.delete(entries).where(eq(entries.projectId, projectId));
       const folders = new Map<string, string>();
       const ensureFolder = async (path: string): Promise<string | null> => {
@@ -159,6 +170,7 @@ export async function registerHistoryRoutes(app: FastifyInstance, context: AppCo
         folders.set(path, folder.id);
         return folder.id;
       };
+      for (const path of checkpoint.folderPaths) await ensureFolder(path);
       let restoredMainId: string | null = null;
       for (const item of checkpoint.manifest) {
         const slash = item.path.lastIndexOf('/');

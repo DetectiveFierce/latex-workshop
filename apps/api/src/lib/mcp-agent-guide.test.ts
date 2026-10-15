@@ -3,7 +3,6 @@ import { describe, expect, it } from 'vitest';
 import {
   editLatexWorkshopProjectPrompt,
   mindPalaceEditingGuide,
-  mindPalaceEditingGuideUri,
   mindPalaceMcpInstructions,
   mindPalaceMcpServerName,
   mindPalaceMcpServerVersion,
@@ -11,72 +10,43 @@ import {
 } from './mcp-agent-guide.js';
 
 describe('Mind Palace MCP agent guidance', () => {
-  it('identifies the site and defines the complete proposal lifecycle', () => {
+  it('makes live editing and refresh the default while preserving optional review', () => {
     expect(mindPalaceMcpServerName).toBe('Mind Palace LaTeX Workshop');
-    expect(mindPalaceMcpServerVersion).toBe('0.5.1');
-    expect(mindPalaceMcpInstructions).toContain('Mind Palace site');
-    expect(mindPalaceMcpInstructions).toContain('not the VS Code extension');
-    expect(mindPalaceMcpInstructions).toContain('Do not claim filesystem access is required');
-    expect(mindPalaceMcpInstructions).toContain('remains available throughout the conversation');
-    expect(mindPalaceMcpInstructions).toContain('the same paper');
-    expect(mindPalaceMcpInstructions).toContain('Call list_projects again');
-    expect(mindPalaceMcpInstructions).toContain('manageAccessUrl');
-    expect(mindPalaceMcpInstructions).toContain('reviewUrl');
-    expect(mindPalaceMcpInstructions).toContain('create_project');
-    expect(mindPalaceMcpInstructions).toContain('rename_project');
-    expect(mindPalaceMcpInstructions).toContain('organize_library');
-    expect(mindPalaceMcpInstructions).toContain('folder/tag conventions');
-    expect(mindPalaceMcpInstructions).toContain('action move_project');
-    expect(mindPalaceMcpInstructions).toContain('folderId=null');
-    expect(projectScopeRule).toContain('top-level Library item');
+    expect(mindPalaceMcpServerVersion).toBe('0.6.0');
+    expect(mindPalaceMcpInstructions).toContain('no owner review is required');
+    expect(mindPalaceMcpInstructions).toContain('reread affected live files');
+    expect(mindPalaceMcpInstructions).toContain('same paper');
+    expect(mindPalaceMcpInstructions).toContain('get_editing_guide');
+    expect(mindPalaceMcpInstructions.length).toBeLessThan(4_000);
+    for (const instruction of [
+      'edit_project',
+      'compile_project',
+      'undoCheckpointId',
+      'create-only',
+      'identical retry',
+      'explicit review-first request',
+      'BU Semester',
+    ])
+      expect(mindPalaceMcpInstructions).toContain(instruction);
     expect(projectScopeRule).toContain('MUST call create_project');
-    expect(projectScopeRule).toContain('Do not use start_proposal');
     expect(projectScopeRule).toContain('MUST call rename_project');
-    expect(mindPalaceMcpInstructions).toContain(mindPalaceEditingGuideUri);
-    expect(mindPalaceMcpInstructions.length).toBeLessThan(2_000);
-    expect(mindPalaceEditingGuide).toContain('every byte of seeded source');
-    expect(mindPalaceEditingGuide).toContain('Source remains unaccepted');
-
-    const steps = [
-      'list_projects',
-      'get_project_tree',
-      'read_text_file',
-      'start_proposal',
-      'put_proposal_file',
-      'finish_proposal',
-    ];
-    for (const step of steps) {
-      const index = mindPalaceEditingGuide.indexOf(step);
-      expect(index, `${step} should be documented`).toBeGreaterThan(-1);
-    }
-    expect(mindPalaceEditingGuide).toContain('complete desired file content');
-    expect(mindPalaceEditingGuide).toContain('expectedProposalRevision');
-    expect(mindPalaceEditingGuide).toContain('needs_rebase');
-    expect(mindPalaceEditingGuide).toContain('Only the owner can apply a proposal');
-    expect(mindPalaceEditingGuide).toContain('Create a project from a template');
-    expect(mindPalaceEditingGuide).toContain('Create a reusable template');
-    expect(mindPalaceEditingGuide).toContain('Do not translate “create a template”');
     expect(mindPalaceEditingGuide).toContain(
-      'make further file changes in the proposal returned by `create_project`',
+      'Whole-project restoration also replaces later saved changes',
     );
-    expect(mindPalaceEditingGuide).toContain('automatically returned compile');
-    expect(mindPalaceEditingGuide).toContain('get_compile_page_images');
-    expect(mindPalaceEditingGuide).toContain('do not routinely poll');
+    expect(mindPalaceEditingGuide).toContain('unsaved browser typing');
+    expect(mindPalaceEditingGuide).toContain('Only the owner can apply a proposal');
   });
 
-  it('builds an immediately actionable edit prompt', () => {
-    const prompt = editLatexWorkshopProjectPrompt(
-      'Research Notes',
-      'Add the missing citation to the introduction.',
-    );
-    expect(prompt).toContain('Mind Palace LaTeX Workshop project named "Research Notes"');
-    expect(prompt).toContain('Add the missing citation to the introduction.');
-    expect(prompt).toContain('finish the proposal for owner review');
-    expect(prompt).toContain('reviewUrl');
-    expect(prompt).toContain('do not claim filesystem access is required');
+  it('generates a live-edit prompt without a mandatory owner handoff', () => {
+    const prompt = editLatexWorkshopProjectPrompt('Research Notes', 'Add the missing citation.');
+    expect(prompt).toContain('project named "Research Notes"');
+    expect(prompt).toContain('Add the missing citation.');
+    expect(prompt).toContain('edit_project');
+    expect(prompt).toContain('compile_project');
+    expect(prompt).not.toContain('finish the proposal for owner review');
   });
 
-  it('keeps the workspace skill aligned with the server-managed workflow', () => {
+  it('keeps the distributed plugin aligned with live editing on subsequent turns', () => {
     const skill = readFileSync(
       new URL(
         '../../../../plugins/latex-workshop/skills/latex-workshop-projects/SKILL.md',
@@ -85,23 +55,16 @@ describe('Mind Palace MCP agent guidance', () => {
       'utf8',
     );
     for (const term of [
-      'LaTeX Workshop',
-      'Mind Palace',
-      'list_projects',
-      'get_project_tree',
-      'read_text_file',
-      'start_proposal',
-      'finish_proposal',
-      'organize_library',
-      'organizationComplete',
-      'action="move_project"',
-      'folderId=null',
-      'manageAccessUrl',
-      'reviewUrl',
-      'filesystem limitation',
       'subsequent turns',
-      'that project',
+      'read_text_file',
+      'edit_project',
+      'expectedSourceRevision',
+      'compile_project',
+      'Undo history',
+      'reviewOnly=true',
+      'manageAccessUrl',
     ])
-      expect(skill, `workspace skill should contain ${term}`).toContain(term);
+      expect(skill).toContain(term);
+    expect(skill).not.toContain('Make all file changes inside that isolated proposal');
   });
 });

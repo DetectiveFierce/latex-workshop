@@ -1,9 +1,10 @@
 import { randomUUID } from 'node:crypto';
-import type { FastifyInstance, FastifyRequest } from 'fastify';
+import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { createMcpHandler, McpServer } from '@modelcontextprotocol/server';
 import { requireMcpAuth } from '@better-auth/mcp';
 import {
+  editAgentProjectSchema,
   agentLibraryMutationSchema,
   agentPdfPageRequestSchema,
   agentPdfPageResponseSchema,
@@ -17,10 +18,13 @@ import {
   renameAgentProjectSchema,
   startAgentProposalSchema,
 } from '@latex-workshop/contracts';
-import { agentClientPolicies, oauthClients } from '@latex-workshop/db';
+import { agentClientPolicies, oauthClients, users } from '@latex-workshop/db';
 import { and, eq } from 'drizzle-orm';
 import type { AppContext } from '../lib/context.js';
 import {
+  acceptRemainingProposalItems,
+  requireGrantedProject,
+  reconcileProposalCompilation,
   finishAgentProposal,
   getAgentClientProposal,
   getAgentProposalCompile,
@@ -33,6 +37,8 @@ import {
   startAgentProposal,
   waitForAgentProposalCompile,
 } from '../lib/agent-proposals.js';
+import { editAgentProject } from '../lib/agent-edits.js';
+import { compileAgentProject, getAgentProjectCompile } from '../lib/agent-compiles.js';
 import { renderAgentProposalPdfPages } from '../lib/agent-pdf-pages.js';
 import { createAgentProject, renameAgentProject } from '../lib/agent-projects.js';
 import { listAgentLibraryOrganization, organizeAgentLibrary } from '../lib/agent-library.js';
@@ -46,7 +52,8 @@ import {
 } from '../lib/mcp-agent-guide.js';
 import {
   localAuthJwksUrl,
-  protectedResourceMetadataUrl,
+  reachableProtectedResourceMetadataUrl,
+  rewriteMcpResourceMetadataChallenge,
   publicAppPageUrl,
   publicAuthIssuerUrl,
   publicRequestUrl,
@@ -55,6 +62,7 @@ import { incrementMetric } from '../lib/operational-metrics.js';
 import { isOAuthTokenAfterRevocation } from '../lib/agent-proposal-policy.js';
 import { mcpHandlerOptions } from '../lib/mcp-transport.js';
 import { mcpToolMetadata } from '../lib/mcp-tool-metadata.js';
+import { trustedPrivateMcpClient } from '../lib/tailnet-auth.js';
 
 const finishAgentProposalSchema = z.object({
   proposalId: z.uuid().describe('Proposal id returned by start_proposal'),
@@ -115,15 +123,16 @@ const agentLibraryToolInputSchema = z.object({
 });
 const listProjectsOutputSchema = z
   .object({
-    manageAccessUrl: z.url(),
+    manageAccessUrl: z.string(),
     projects: z.array(
-      z.object({ id: z.uuid(), name: z.string(), workspaceUrl: z.url() }).passthrough(),
+      z.object({ id: z.string(), name: z.string(), workspaceUrl: z.string() }).passthrough(),
     ),
   })
   .passthrough();
 const projectTreeOutputSchema = z
   .object({
-    projectId: z.uuid(),
+    projectId: z.string(),
+    sourceRevision: z.number().int().nonnegative(),
     entries: z.array(
       z
         .object({
@@ -153,23 +162,12 @@ const compileJobSummarySchema = z
   })
   .passthrough();
 const createProjectOutputSchema = z.object({
+  applied: z.boolean(),
   project: agentProjectSummarySchema,
   proposal: agentProposalSummarySchema,
   compile: compileJobSummarySchema.nullable(),
-  reviewUrl: z.url(),
+  reviewUrl: z.string(),
   nextAction: z.string(),
-});
-const renameProjectOutputSchema = z.object({ project: agentProjectSummarySchema });
-const libraryMutationOutputSchema = z.object({ action: z.string() }).passthrough();
-const finishProposalOutputSchema = agentProposalSummarySchema.extend({
-  compile: compileJobSummarySchema.nullable(),
-  reviewUrl: z.url(),
-});
-const proposalMutationOutputSchema = agentProposalSummarySchema;
-const proposalCompileOutputSchema = z.object({ job: compileJobSummarySchema.nullable() });
-const compileProposalOutputSchema = z.object({
-  proposal: agentProposalSummarySchema,
-  job: compileJobSummarySchema.nullable(),
 });
 const readTextOutputSchema = z.object({
   path: z.string(),
@@ -214,7 +212,9 @@ function scopesFromClaims(claims: z.infer<typeof tokenClaimsSchema>): string[] {
   return Array.isArray(claims.scope) ? claims.scope : claims.scope.split(/\s+/).filter(Boolean);
 }
 
-async function createServer(context: AppContext, claims: unknown) {
+async function createServer(context: AppContext, claims: unknown, privateAccess = false) {
+  const toolMetadata: typeof mcpToolMetadata = (kind, options) =>
+    mcpToolMetadata(kind, options, privateAccess ? 'private' : 'oauth');
   const parsed = tokenClaimsSchema.parse(claims);
   const clientId = parsed.client_id ?? parsed.azp;
   if (!clientId) throw new Error('OAuth client identity is missing');
@@ -267,7 +267,7 @@ async function createServer(context: AppContext, claims: unknown) {
     {
       title: 'How to manage and edit Mind Palace LaTeX Workshop projects',
       description:
-        'Authoritative top-level project/template scope rules, proposal workflow, compile results, and owner handoff.',
+        'Live editing, undo, follow-up refresh, optional review, project/template scope, and compile instructions.',
       mimeType: 'text/markdown',
     },
     async (uri) => ({
@@ -275,14 +275,25 @@ async function createServer(context: AppContext, claims: unknown) {
     }),
   );
   server.registerTool(
+    'get_editing_guide',
+    {
+      title: 'Learn all Workshop editing capabilities',
+      description:
+        'Read the complete Mind Palace LaTeX Workshop live-edit, undo, refresh, compile, project creation and optional review workflow. Available even in clients that do not expose MCP resources.',
+      inputSchema: z.object({}),
+      ...toolMetadata('read'),
+    },
+    async () => ({ content: [{ type: 'text' as const, text: mindPalaceEditingGuide }] }),
+  );
+  server.registerTool(
     'list_projects',
     {
       title: 'List Mind Palace LaTeX Workshop projects',
       description:
-        'Use this first for every request to read, create, place, move, rename, compile, or edit a Mind Palace LaTeX Workshop project. Also use it again on conversational follow-ups such as "now update it", "that project", "the same paper", or "try again" when earlier messages identified a Mind Palace project, even if the current message omits the product name. These are private site-hosted projects, not local files. Match displayed names and never guess ids. Results include Library folders plus each project folderId/tagIds. Create directly in a folder with create_project(folderId). Move an existing project with organize_library action move_project and destination folderId; null means Library root. If a project is absent, send the user to manageAccessUrl.',
+        'Discover connected Mind Palace LaTeX Workshop projects on Workshop mentions or requests to edit/query a LaTeX file, including file follow-ups. No explicit skill invocation is needed. Generic proof checking alone must not query Workshop. Honor explicit local paths. Resolve names; never guess ids. Returns projects, Library folders/tags, capabilities, and manageAccessUrl. Default edit: get_project_tree → read_text_file → edit_project → compile_project. Use BU Semester tools for course evidence.',
       inputSchema: z.object({}),
       outputSchema: listProjectsOutputSchema,
-      ...mcpToolMetadata('read'),
+      ...toolMetadata('read'),
     },
     async () => {
       const [projects, organization] = await Promise.all([
@@ -294,6 +305,14 @@ async function createServer(context: AppContext, claims: unknown) {
           scopeRule: projectScopeRule,
           projectCreationTool: 'create_project',
           manageAccessUrl,
+          capabilities: {
+            liveEditing: scopes.has('proposals:write'),
+            defaultEditTool: 'edit_project',
+            compileTool: 'compile_project',
+            undo: 'File Undo history and project Version history',
+            reviewOptional: true,
+            guideUri: mindPalaceEditingGuideUri,
+          },
           projects: projects.map(projectWithUrl),
           ...organization,
         },
@@ -306,10 +325,9 @@ async function createServer(context: AppContext, claims: unknown) {
     {
       title: 'Organize the Mind Palace LaTeX Workshop Library',
       description:
-        'Use after list_projects for immediate top-level Mind Palace LaTeX Workshop Library metadata changes. To move an existing project between folders, call action=move_project with its projectId and the destination folderId; use folderId=null for Library root, then refresh list_projects to verify. Other actions: create_folder; update_folder to rename/move a Library folder; trash_folder; create_tag; update_tag; delete_tag; set_project_tags. This is distinct from propose_structure, which only changes files/folders inside a project. Use returned ids; operations affecting ungranted projects are refused.',
+        'Immediate Mind Palace LaTeX Workshop Library metadata actions. move_project takes projectId and destination folderId (null=root). Other actions create/update/trash folders, create/update/delete tags, and set_project_tags. Refresh list_projects afterward. Ungranted projects remain protected.',
       inputSchema: agentLibraryToolInputSchema,
-      outputSchema: libraryMutationOutputSchema,
-      ...mcpToolMetadata('write', { destructive: true, idempotent: false }),
+      ...toolMetadata('write', { destructive: true, idempotent: false }),
     },
     async (raw) => {
       requireWrite();
@@ -329,10 +347,10 @@ async function createServer(context: AppContext, claims: unknown) {
     {
       title: 'Create a Mind Palace LaTeX Workshop project or template',
       description:
-        'Use this only for a new top-level Mind Palace LaTeX Workshop project or reusable template. Inspect list_projects first. Pass folderId to create it directly in that existing Library folder and tagIds for its initial tags; omit folderId for Library root. Honor the user’s requested folder, otherwise infer placement from the source/template and closely related projects when evidence is strong. Omit sourceProjectId for blank source or pass a granted source to copy. Customize only the returned new-project proposal; metadata is immediate while source remains reviewable.',
+        'Create a new top-level Mind Palace LaTeX Workshop project/template, not a file. Use folderId/tagIds from list_projects. Omit sourceProjectId for blank source or copy a granted source. isTemplate=true makes a reusable template. Seeded source is live by default; customize the NEW project with edit_project. reviewOnly=true is optional owner review.',
       inputSchema: createAgentProjectSchema,
       outputSchema: createProjectOutputSchema,
-      ...mcpToolMetadata('write'),
+      ...toolMetadata('write'),
     },
     async (raw, requestContext) => {
       requireWrite();
@@ -342,16 +360,33 @@ async function createServer(context: AppContext, claims: unknown) {
         createAgentProjectSchema.parse(raw),
       );
       const compile = await compileReview(created.proposal, requestContext.mcpReq.signal);
+      const input = createAgentProjectSchema.parse(raw);
+      const project = await requireGrantedProject(context, identity, created.project.id);
+      const proposal =
+        !input.reviewOnly && created.proposal.status === 'reviewing'
+          ? await acceptRemainingProposalItems(
+              context,
+              identity.userId,
+              created.proposal.id,
+              created.proposal.revision,
+              { expectedSourceRevision: project.sourceRevision },
+            )
+          : created.proposal;
+      if (!input.reviewOnly)
+        await reconcileProposalCompilation(context, identity.userId, proposal.id);
+
       return jsonResult(
         {
+          applied: !input.reviewOnly && proposal.status === 'resolved',
           project: projectWithUrl(created.project),
-          proposal: proposalSummary(created.proposal),
+          proposal: proposalSummary(proposal),
           compile: compileJobSummary(compile),
           reviewUrl: workspaceUrl(created.project.id),
-          nextAction:
-            'If the user requested further content customization, mutate and re-finish the returned proposal for this NEW project. Never start or mutate a proposal on sourceProjectId.',
+          nextAction: input.reviewOnly
+            ? 'Seeded source is ready for owner review. Customize this new-project proposal.'
+            : 'Seeded source is live. Refresh the NEW project tree and customize it with edit_project; never edit sourceProjectId.',
         },
-        `Created Mind Palace LaTeX Workshop project "${created.project.name}" with proposal revision ${created.proposal.revision}.`,
+        `Created Mind Palace LaTeX Workshop project "${created.project.name}"; ${input.reviewOnly ? 'seeded source awaits optional owner review' : 'seeded source is live'}.`,
       );
     },
   );
@@ -360,10 +395,9 @@ async function createServer(context: AppContext, claims: unknown) {
     {
       title: 'Rename a Mind Palace LaTeX Workshop project or template',
       description:
-        'Use this only when the user wants to rename a top-level Mind Palace LaTeX Workshop project or template. This is different from propose_structure, which only renames files or folders inside a project. The metadata rename takes effect immediately.',
+        'Immediately rename a top-level Mind Palace LaTeX Workshop project/template. For a file or folder rename use edit_project structure.',
       inputSchema: renameAgentProjectSchema,
-      outputSchema: renameProjectOutputSchema,
-      ...mcpToolMetadata('write'),
+      ...toolMetadata('write'),
     },
     async (raw) => {
       requireWrite();
@@ -383,10 +417,10 @@ async function createServer(context: AppContext, claims: unknown) {
     {
       title: 'Inspect a Mind Palace LaTeX Workshop project',
       description:
-        'Use this after list_projects to inspect the files inside one Mind Palace LaTeX Workshop project. If the project is only a formatting source for a requested new project or template, treat it as read-only reference material and call create_project after inspection. Returns paths, hashes, versions, and editable flags.',
+        'Read the current Mind Palace LaTeX Workshop sourceRevision, paths, hashes, versions, editable flags, compiler and main file. Refresh before writing. A source project used to create another item is read-only reference material.',
       inputSchema: getTreeSchema,
       outputSchema: projectTreeOutputSchema,
-      ...mcpToolMetadata('read'),
+      ...toolMetadata('read'),
     },
     async (raw) => {
       const { projectId } = getTreeSchema.parse(raw);
@@ -402,10 +436,10 @@ async function createServer(context: AppContext, claims: unknown) {
     {
       title: 'Read a Mind Palace LaTeX Workshop source file',
       description:
-        'Use this after inspecting a Mind Palace LaTeX Workshop project to read accepted UTF-8 source. Continue with nextOffset until null. Preserve hash as baseHash when replacing this file in a proposal so accepted-source drift becomes an explicit conflict.',
+        'Read current saved Mind Palace LaTeX Workshop UTF-8 source, including owner/agent edits. Follow nextOffset until null; restart if hash changes between pages. Reread before follow-ups. Use its current hash as edit_project baseHash.',
       inputSchema: readTextFileSchema,
       outputSchema: readTextOutputSchema,
-      ...mcpToolMetadata('read'),
+      ...toolMetadata('read'),
     },
     async (raw) => {
       const file = await readAgentTextFile(context, identity, readTextFileSchema.parse(raw));
@@ -416,14 +450,90 @@ async function createServer(context: AppContext, claims: unknown) {
     },
   );
   server.registerTool(
+    'edit_project',
+    {
+      title: 'Edit live Mind Palace LaTeX Workshop files',
+      description:
+        'Default Mind Palace LaTeX Workshop edit: atomically apply live complete files and structure, without owner approval. Use fresh tree expectedSourceRevision and read hashes; baseHash=null is create-only. Returns current tree and undoCheckpointId. Refresh before each follow-up; stale state conflicts. Identical retries reuse their UUID. Undo history restores files; Version history restores the pre-edit project checkpoint.',
+      inputSchema: editAgentProjectSchema,
+      outputSchema: projectTreeOutputSchema.extend({
+        editId: z.string(),
+        applied: z.boolean(),
+        replayed: z.boolean(),
+        undoCheckpointId: z.string().nullable(),
+        nextAction: z.string(),
+      }),
+      ...toolMetadata('write', { destructive: true }),
+    },
+    async (raw) => {
+      requireWrite();
+      const result = await editAgentProject(context, identity, editAgentProjectSchema.parse(raw));
+      return jsonResult(
+        { ...result, workspaceUrl: workspaceUrl(result.projectId) },
+        result.replayed
+          ? `Edit ${result.editId} already completed; no changes were reapplied. The returned tree is current.`
+          : `Applied edit ${result.editId}. Changes are live; undo is available in Mind Palace.`,
+      );
+    },
+  );
+  server.registerTool(
+    'compile_project',
+    {
+      title: 'Compile the live Mind Palace LaTeX Workshop project',
+      description:
+        'Compile live Mind Palace LaTeX Workshop source from an immutable checkpoint; wait up to 50 seconds. Inspect diagnostics, then correct via edit_project. Recover pending jobs with get_project_compile. Failed builds preserve the successful PDF.',
+      inputSchema: getTreeSchema.extend({ expectedSourceRevision: z.number().int().nonnegative() }),
+      ...toolMetadata('write'),
+    },
+    async (raw, requestContext) => {
+      requireWrite();
+      const input = getTreeSchema
+        .extend({ expectedSourceRevision: z.number().int().nonnegative() })
+        .parse(raw);
+      const job = await compileAgentProject(
+        context,
+        identity,
+        input.projectId,
+        input.expectedSourceRevision,
+        requestContext.mcpReq.signal,
+      );
+      return jsonResult(
+        { job: compileJobSummary(job) },
+        `Project compile ${job?.status ?? 'unavailable'}; inspect the returned diagnostics.`,
+      );
+    },
+  );
+  server.registerTool(
+    'get_project_compile',
+    {
+      title: 'Read a live project compile result',
+      description:
+        'Read a Mind Palace LaTeX Workshop live-source compile by exact compileJobId, or latest when omitted. Recover interrupted waits; sourceRevision identifies the compiled saved source.',
+      inputSchema: getTreeSchema.extend({ compileJobId: z.uuid().optional() }),
+      ...toolMetadata('read'),
+    },
+    async (raw) => {
+      const input = getTreeSchema.extend({ compileJobId: z.uuid().optional() }).parse(raw);
+      const job = await getAgentProjectCompile(
+        context,
+        identity,
+        input.projectId,
+        input.compileJobId,
+      );
+      return jsonResult(
+        { job: compileJobSummary(job) },
+        `Project compile ${job?.status ?? 'not yet requested'}.`,
+      );
+    },
+  );
+  server.registerTool(
     'start_proposal',
     {
       title: 'Start a Mind Palace LaTeX Workshop proposal',
       description:
-        'Use this to begin reviewable file or folder changes inside an existing Mind Palace LaTeX Workshop project. It cannot create a top-level project or template. If the user requested a new project or template, call create_project and customize the proposal returned by that tool.',
+        'Optional Mind Palace LaTeX Workshop review-first draft. Normal edits use edit_project. Cannot create a top-level project; use create_project. Only customize a new-project proposal when reviewOnly=true was requested.',
       inputSchema: startAgentProposalSchema,
-      outputSchema: proposalMutationOutputSchema,
-      ...mcpToolMetadata('write'),
+      ...toolMetadata('write'),
     },
     async (raw) => {
       requireWrite();
@@ -440,10 +550,9 @@ async function createServer(context: AppContext, claims: unknown) {
     {
       title: 'Write a Mind Palace LaTeX Workshop proposal file',
       description:
-        'Use this to create or replace a complete UTF-8 file inside a Mind Palace LaTeX Workshop proposal. It changes only the reviewable proposal, never accepted source. For a newly created project or template, use the proposal returned by create_project, not its source project.',
+        'Optional Mind Palace LaTeX Workshop proposal file write. Normal live edits use edit_project. Send full UTF-8 content and current baseHash; chain expectedProposalRevision. Accepted source stays unchanged.',
       inputSchema: putAgentProposalFileSchema.extend({ proposalId: z.uuid() }),
-      outputSchema: proposalMutationOutputSchema,
-      ...mcpToolMetadata('write'),
+      ...toolMetadata('write'),
     },
     async (raw) => {
       requireWrite();
@@ -465,10 +574,9 @@ async function createServer(context: AppContext, claims: unknown) {
     {
       title: 'Propose Mind Palace LaTeX Workshop structure changes',
       description:
-        'Use this to propose file or folder moves, renames, or deletions inside one Mind Palace LaTeX Workshop project. It changes only the reviewable proposal, not accepted source. Use create_project or rename_project for top-level Library items. Use exact paths and chain expectedProposalRevision.',
+        'Optional Mind Palace LaTeX Workshop proposal moves/renames/deletions/folders. Normal live edits use edit_project structure. Chain expectedProposalRevision. Top-level Library items use create_project, rename_project or organize_library.',
       inputSchema: proposeAgentStructureSchema.extend({ proposalId: z.uuid() }),
-      outputSchema: proposalMutationOutputSchema,
-      ...mcpToolMetadata('write'),
+      ...toolMetadata('write'),
     },
     async (raw) => {
       requireWrite();
@@ -487,10 +595,9 @@ async function createServer(context: AppContext, claims: unknown) {
     {
       title: 'Get a Mind Palace LaTeX Workshop proposal',
       description:
-        'Use this to refresh a durable Mind Palace LaTeX Workshop proposal after a retry, concurrent owner action, or revision conflict. Returns the current revision, status, conflicts, changes, frozen review hunks, and latest compile job id.',
+        'Refresh an optional Mind Palace LaTeX Workshop review draft after retries/conflicts. Returns revision, status, changes, hunks, conflicts and compile id.',
       inputSchema: getProposalSchema,
-      outputSchema: proposalMutationOutputSchema,
-      ...mcpToolMetadata('read'),
+      ...toolMetadata('read'),
     },
     async (raw) => {
       const { proposalId } = getProposalSchema.parse(raw);
@@ -506,10 +613,9 @@ async function createServer(context: AppContext, claims: unknown) {
     {
       title: 'Compile a Mind Palace LaTeX Workshop proposal',
       description:
-        'Use this to preflight a draft Mind Palace LaTeX Workshop proposal in the hardened, networkless compiler and wait for its result. Returns warnings, errors, diagnostics, and a bounded log. Use get_proposal_compile only after an interrupted or unusually long request.',
+        'Compile an optional Mind Palace LaTeX Workshop review draft and wait for diagnostics/log. Normal live edits use compile_project. Recover interrupted waits with get_proposal_compile.',
       inputSchema: finishAgentProposalSchema,
-      outputSchema: compileProposalOutputSchema,
-      ...mcpToolMetadata('write'),
+      ...toolMetadata('write'),
     },
     async (raw, requestContext) => {
       requireWrite();
@@ -537,10 +643,9 @@ async function createServer(context: AppContext, claims: unknown) {
     {
       title: 'Get a Mind Palace LaTeX Workshop compile result',
       description:
-        'Use this only to recover an interrupted or timed-out Mind Palace LaTeX Workshop compile wait. Returns the latest proposal compile job, including status, diagnostics, and bounded log. null means this revision has not been compiled.',
+        'Recover an interrupted Mind Palace LaTeX Workshop proposal compile wait. Returns latest job, diagnostics/log, or null if not compiled.',
       inputSchema: getProposalSchema,
-      outputSchema: proposalCompileOutputSchema,
-      ...mcpToolMetadata('read'),
+      ...toolMetadata('read'),
     },
     async (raw) => {
       const { proposalId } = getProposalSchema.parse(raw);
@@ -558,10 +663,10 @@ async function createServer(context: AppContext, claims: unknown) {
     {
       title: 'Inspect Mind Palace LaTeX Workshop PDF pages',
       description:
-        'Use this after a successful Mind Palace LaTeX Workshop proposal compile to inspect one to three specific one-based PDF pages as PNG images. Request additional pages in another call when visual or layout-sensitive work spans more pages.',
+        'Inspect 1–3 one-based Mind Palace LaTeX Workshop PDF pages from an exact succeeded job. Use projectId for live builds, proposalId for optional review builds. Request additional pages in another call.',
       inputSchema: agentPdfPageRequestSchema,
       outputSchema: agentPdfPageResponseSchema,
-      ...mcpToolMetadata('read'),
+      ...toolMetadata('read'),
     },
     async (raw, requestContext) => {
       const input = agentPdfPageRequestSchema.parse(raw);
@@ -589,10 +694,9 @@ async function createServer(context: AppContext, claims: unknown) {
     {
       title: 'Finish a Mind Palace LaTeX Workshop proposal',
       description:
-        'Use this to submit the latest Mind Palace LaTeX Workshop draft for owner review and automatically compile the frozen revision. Return reviewUrl to the user after a successful handoff. reviewing means ready for review, not accepted. If needs_rebase, reread conflicts, rewrite against current hashes, and finish again.',
+        'Optional Mind Palace LaTeX Workshop review handoff; freezes and compiles the draft. reviewing means awaiting owner acceptance; return reviewUrl. For needs_rebase reread conflicts and rewrite. Live edit_project changes need no handoff.',
       inputSchema: finishAgentProposalSchema,
-      outputSchema: finishProposalOutputSchema,
-      ...mcpToolMetadata('write'),
+      ...toolMetadata('write'),
     },
     async (raw, requestContext) => {
       requireWrite();
@@ -636,116 +740,131 @@ export async function registerMcpRoutes(app: FastifyInstance, context: AppContex
   const resource = context.config.AGENT_MCP_RESOURCE_URL;
   if (!resource) throw new Error('AGENT_MCP_RESOURCE_URL is required');
   const issuer = publicAuthIssuerUrl(context.config.API_ORIGIN);
+  const reachableResourceMetadataUrl = reachableProtectedResourceMetadataUrl(
+    context.config.API_ORIGIN,
+  );
   const mcpHandler = createMcpHandler(async (requestContext) => {
     const claims = requestContext.authInfo?.extra?.claims;
-    return createServer(context, claims);
+    return createServer(context, claims, requestContext.authInfo?.extra?.privateAccess === true);
   }, mcpHandlerOptions);
+  const handleAuthenticatedRequest = async (
+    request: Request,
+    claims: Record<string, unknown>,
+    privateAccess = false,
+  ) => {
+    const accessToken = request.headers.get('authorization')?.replace(/^Bearer\s+/i, '') ?? '';
+    const clientId = String(claims.client_id ?? claims.azp ?? 'unknown');
+    const userId = String(claims.sub ?? 'unknown');
+    const [policy] = await context.db
+      .select({ tokensRevokedAt: agentClientPolicies.tokensRevokedAt })
+      .from(agentClientPolicies)
+      .where(
+        and(eq(agentClientPolicies.userId, userId), eq(agentClientPolicies.clientId, clientId)),
+      )
+      .limit(1);
+    const issuedAt = typeof claims.iat === 'number' ? claims.iat : undefined;
+    if (
+      !policy ||
+      (privateAccess
+        ? policy.tokensRevokedAt !== null
+        : !isOAuthTokenAfterRevocation(issuedAt, policy.tokensRevokedAt))
+    )
+      return new Response(
+        JSON.stringify({
+          jsonrpc: '2.0',
+          error: { code: -32001, message: 'Access token is expired or revoked' },
+          id: null,
+        }),
+        {
+          status: 401,
+          headers: {
+            'content-type': 'application/json',
+            'www-authenticate': `Bearer resource_metadata="${reachableResourceMetadataUrl}", error="invalid_token"`,
+          },
+        },
+      );
+    const body = await request
+      .clone()
+      .json()
+      .catch(() => null);
+    const toolName = z
+      .object({ method: z.literal('tools/call'), params: z.object({ name: z.string() }) })
+      .safeParse(body);
+    const writes = new Set([
+      'edit_project',
+      'compile_project',
+      'create_project',
+      'rename_project',
+      'organize_library',
+      'start_proposal',
+      'put_proposal_file',
+      'propose_structure',
+      'compile_proposal',
+      'finish_proposal',
+    ]);
+    const kind = toolName.success && writes.has(toolName.data.params.name) ? 'write' : 'read';
+    const tokenScopes = new Set(
+      typeof claims.scope === 'string'
+        ? claims.scope.split(/\s+/).filter(Boolean)
+        : Array.isArray(claims.scope)
+          ? claims.scope.filter((scope): scope is string => typeof scope === 'string')
+          : [],
+    );
+    if (kind === 'write' && !tokenScopes.has('proposals:write')) {
+      incrementMetric('latex_mcp_requests_total', {
+        kind,
+        outcome: 'insufficient_scope',
+      });
+      return new Response(
+        JSON.stringify({
+          jsonrpc: '2.0',
+          error: { code: -32001, message: 'The proposals:write scope is required' },
+          id: null,
+        }),
+        {
+          status: 403,
+          headers: {
+            'content-type': 'application/json',
+            'www-authenticate': `Bearer resource_metadata="${reachableResourceMetadataUrl}", error="insufficient_scope", scope="proposals:write"`,
+          },
+        },
+      );
+    }
+    const window = Math.floor(Date.now() / 60_000);
+    const key = `mcp-rate:${userId}:${clientId}:${kind}:${window}`;
+    const count = await context.redis.incr(key);
+    if (count === 1) await context.redis.expire(key, 70);
+    const maximum =
+      kind === 'write'
+        ? context.config.AGENT_MCP_WRITES_PER_MINUTE
+        : context.config.AGENT_MCP_READS_PER_MINUTE;
+    if (count > maximum) {
+      incrementMetric('latex_mcp_requests_total', { kind, outcome: 'rate_limited' });
+      return new Response(
+        JSON.stringify({
+          jsonrpc: '2.0',
+          error: { code: -32000, message: 'Rate limit exceeded' },
+          id: null,
+        }),
+        { status: 429, headers: { 'content-type': 'application/json', 'retry-after': '60' } },
+      );
+    }
+    incrementMetric('latex_mcp_requests_total', { kind, outcome: 'allowed' });
+    return mcpHandler.fetch(request, {
+      ...(body === null ? {} : { parsedBody: body }),
+      authInfo: {
+        token: accessToken,
+        clientId: String(claims.client_id ?? claims.azp ?? ''),
+        scopes: [...tokenScopes],
+        ...(typeof claims.exp === 'number' ? { expiresAt: claims.exp } : {}),
+        resource: new URL(resource),
+        extra: { claims, privateAccess },
+      },
+    });
+  };
   const protectedHandler = requireMcpAuth(
     context.auth,
-    async (request, claims) => {
-      const accessToken = request.headers.get('authorization')?.replace(/^Bearer\s+/i, '') ?? '';
-      const clientId = String(claims.client_id ?? claims.azp ?? 'unknown');
-      const userId = String(claims.sub ?? 'unknown');
-      const [policy] = await context.db
-        .select({ tokensRevokedAt: agentClientPolicies.tokensRevokedAt })
-        .from(agentClientPolicies)
-        .where(
-          and(eq(agentClientPolicies.userId, userId), eq(agentClientPolicies.clientId, clientId)),
-        )
-        .limit(1);
-      const issuedAt = typeof claims.iat === 'number' ? claims.iat : undefined;
-      if (!policy || !isOAuthTokenAfterRevocation(issuedAt, policy.tokensRevokedAt))
-        return new Response(
-          JSON.stringify({
-            jsonrpc: '2.0',
-            error: { code: -32001, message: 'Access token is expired or revoked' },
-            id: null,
-          }),
-          {
-            status: 401,
-            headers: {
-              'content-type': 'application/json',
-              'www-authenticate': `Bearer resource_metadata="${protectedResourceMetadataUrl(resource)}", error="invalid_token"`,
-            },
-          },
-        );
-      const body = await request
-        .clone()
-        .json()
-        .catch(() => null);
-      const toolName = z
-        .object({ method: z.literal('tools/call'), params: z.object({ name: z.string() }) })
-        .safeParse(body);
-      const writes = new Set([
-        'create_project',
-        'rename_project',
-        'organize_library',
-        'start_proposal',
-        'put_proposal_file',
-        'propose_structure',
-        'compile_proposal',
-        'finish_proposal',
-      ]);
-      const kind = toolName.success && writes.has(toolName.data.params.name) ? 'write' : 'read';
-      const tokenScopes = new Set(
-        typeof claims.scope === 'string'
-          ? claims.scope.split(/\s+/).filter(Boolean)
-          : Array.isArray(claims.scope)
-            ? claims.scope.filter((scope): scope is string => typeof scope === 'string')
-            : [],
-      );
-      if (kind === 'write' && !tokenScopes.has('proposals:write')) {
-        incrementMetric('latex_mcp_requests_total', {
-          kind,
-          outcome: 'insufficient_scope',
-        });
-        return new Response(
-          JSON.stringify({
-            jsonrpc: '2.0',
-            error: { code: -32001, message: 'The proposals:write scope is required' },
-            id: null,
-          }),
-          {
-            status: 403,
-            headers: {
-              'content-type': 'application/json',
-              'www-authenticate': `Bearer resource_metadata="${protectedResourceMetadataUrl(resource)}", error="insufficient_scope", scope="proposals:write"`,
-            },
-          },
-        );
-      }
-      const window = Math.floor(Date.now() / 60_000);
-      const key = `mcp-rate:${userId}:${clientId}:${kind}:${window}`;
-      const count = await context.redis.incr(key);
-      if (count === 1) await context.redis.expire(key, 70);
-      const maximum =
-        kind === 'write'
-          ? context.config.AGENT_MCP_WRITES_PER_MINUTE
-          : context.config.AGENT_MCP_READS_PER_MINUTE;
-      if (count > maximum) {
-        incrementMetric('latex_mcp_requests_total', { kind, outcome: 'rate_limited' });
-        return new Response(
-          JSON.stringify({
-            jsonrpc: '2.0',
-            error: { code: -32000, message: 'Rate limit exceeded' },
-            id: null,
-          }),
-          { status: 429, headers: { 'content-type': 'application/json', 'retry-after': '60' } },
-        );
-      }
-      incrementMetric('latex_mcp_requests_total', { kind, outcome: 'allowed' });
-      return mcpHandler.fetch(request, {
-        ...(body === null ? {} : { parsedBody: body }),
-        authInfo: {
-          token: accessToken,
-          clientId: String(claims.client_id ?? claims.azp ?? ''),
-          scopes: [...tokenScopes],
-          ...(typeof claims.exp === 'number' ? { expiresAt: claims.exp } : {}),
-          resource: new URL(resource),
-          extra: { claims },
-        },
-      });
-    },
+    (request, claims) => handleAuthenticatedRequest(request, claims),
     {
       issuer,
       // Verify the public issuer, but fetch its keys over loopback. Path-mounted self-hosts may
@@ -756,11 +875,87 @@ export async function registerMcpRoutes(app: FastifyInstance, context: AppContex
       challengeScopes: ['projects:read', 'proposals:write'],
     },
   );
+  const servePrivateRequest = async (request: FastifyRequest, reply: FastifyReply) => {
+    const webRequest = toWebRequest(context, request);
+    const clientId = trustedPrivateMcpClient(context.config, webRequest.headers);
+    if (!clientId) return reply.code(401).send({ error: 'Private identity required' });
+    const [user] = await context.db
+      .select({ id: users.id })
+      .from(users)
+      .innerJoin(oauthClients, eq(oauthClients.userId, users.id))
+      .where(
+        and(
+          eq(users.email, context.config.AGENT_MCP_PRIVATE_OWNER_EMAIL ?? ''),
+          eq(users.emailVerified, true),
+          eq(oauthClients.clientId, clientId),
+          eq(oauthClients.disabled, false),
+        ),
+      )
+      .limit(1);
+    if (!user) return reply.code(401).send({ error: 'Private identity required' });
+    const claims = {
+      sub: user.id,
+      client_id: clientId,
+      scope: 'projects:read proposals:write',
+      exp: Math.floor(Date.now() / 1000) + 900,
+    };
+    return sendWebResponse(await handleAuthenticatedRequest(webRequest, claims, true), reply);
+  };
+  app.post(
+    '/api/mcp/private',
+    { bodyLimit: agentProposalLimits.maxProposalBytes * 6 + 256 * 1024 },
+    servePrivateRequest,
+  );
   app.post(
     '/api/mcp',
-    { bodyLimit: agentProposalLimits.maxFileBytes + 64 * 1024 },
-    async (request, reply) =>
-      sendWebResponse(await protectedHandler(toWebRequest(context, request)), reply),
+    { bodyLimit: agentProposalLimits.maxProposalBytes * 6 + 256 * 1024 },
+    async (request, reply) => {
+      if (request.headers['x-workshop-tailnet-key'] || request.headers['x-workshop-tunnel-key'])
+        return servePrivateRequest(request, reply);
+      const body = request.body;
+      const method =
+        body !== null && typeof body === 'object' && 'method' in body ? body.method : undefined;
+      if (
+        method === 'initialize' ||
+        method === 'notifications/initialized' ||
+        method === 'tools/list'
+      ) {
+        // Tunnel startup needs only protocol metadata. Every data-bearing method still
+        // passes through the OAuth guard below.
+        const claims = {
+          sub: 'mcp-discovery',
+          client_id: 'mcp-discovery',
+          scope: 'projects:read',
+          exp: Math.floor(Date.now() / 1000) + 60,
+        };
+        const response = await mcpHandler.fetch(toWebRequest(context, request), {
+          parsedBody: body,
+          authInfo: {
+            token: 'mcp-discovery',
+            clientId: claims.client_id,
+            scopes: ['projects:read'],
+            expiresAt: claims.exp,
+            resource: new URL(resource),
+            extra: { claims },
+          },
+        });
+        return sendWebResponse(response, reply);
+      }
+      const response = await protectedHandler(toWebRequest(context, request));
+      const challenge = response.headers.get('www-authenticate');
+      if (challenge?.includes('resource_metadata=')) {
+        const headers = new Headers(response.headers);
+        headers.set(
+          'www-authenticate',
+          rewriteMcpResourceMetadataChallenge(challenge, resource, context.config.API_ORIGIN),
+        );
+        return sendWebResponse(
+          new Response(response.body, { status: response.status, headers }),
+          reply,
+        );
+      }
+      return sendWebResponse(response, reply);
+    },
   );
   app.addHook('onClose', async () => mcpHandler.close());
 }

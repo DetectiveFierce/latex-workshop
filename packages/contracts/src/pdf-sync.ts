@@ -87,6 +87,10 @@ export type PdfSyncResult = z.infer<typeof pdfSyncResultSchema>;
 
 export const inverseSyncRequestSchema = pdfPointSchema.extend({
   source: syncSourceIdentitySchema.default({ target: 'accepted' }),
+  text: z.string().max(2_000).optional(),
+  before: z.string().max(200).optional(),
+  after: z.string().max(200).optional(),
+  points: z.array(pdfPointSchema).max(6).optional(),
 });
 export type InverseSyncRequest = z.infer<typeof inverseSyncRequestSchema>;
 
@@ -94,5 +98,9 @@ export const inverseSyncResultSchema = z.object({
   path: z.string(),
   line: z.number().int().positive(),
   column: z.number().int().nullable(),
+  entryId: z.uuid().nullable().optional(),
+  selection: sourceSelectionSchema.optional(),
+  confidence: z.enum(['exact', 'context', 'approximate']).optional(),
+  artifactStale: z.boolean().optional(),
 });
 export type InverseSyncResult = z.infer<typeof inverseSyncResultSchema>;

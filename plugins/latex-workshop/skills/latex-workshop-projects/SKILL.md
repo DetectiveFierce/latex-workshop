@@ -1,11 +1,13 @@
 ---
 name: latex-workshop-projects
-description: Use when a user asks to find, organize, read, create, rename, edit, fix, compile, tag, move, or review a LaTeX Workshop or Mind Palace LaTeX project. Also use on subsequent turns when the user refers indirectly to a Mind Palace project established earlier in the conversation, such as "it", "that project", "the same paper", "now", "also", or "try again". Operates the private site through connected tools, not local files or the VS Code extension.
+description: Activate on mentions of LaTeX Workshop or requests to edit or query a LaTeX file, including follow-ups about an established file. No explicit skill invocation is needed. Generic proof checking or math help alone does not activate this skill. Uses connected Mind Palace project tools; honor explicit local-file and VS Code extension requests.
 ---
 
 # Mind Palace LaTeX Workshop projects
 
 Treat “LaTeX Workshop project” as a project hosted on the user's Mind Palace site. Never substitute a local directory, ask for a file upload, or say filesystem access is required when the connected LaTeX Workshop tools are available.
+
+Select this skill implicitly on a mention of LaTeX Workshop or a request to edit or query a LaTeX file. This includes indirect follow-ups about a file established earlier in the conversation, such as “apply that correction to it.” No explicit skill invocation or renewed permission to use an existing connection is required. A generic request such as “check my proof,” “explain this theorem,” or “help with homework” does not activate the skill by itself; do not search Workshop merely because it might contain relevant math. Read accessible project metadata to resolve the requested document when needed. Edit only within the user's requested work; read-only queries do not authorize unrelated source changes. When an explicit local path or VS Code extension request triggers this skill, honor that choice and route to the appropriate local tools rather than the hosted Workshop.
 
 Keep this workflow active across subsequent turns in the same conversation. When the preceding context established a Mind Palace project, interpret follow-ups such as “now revise the conclusion”, “also compile it”, “that project”, “the same paper”, or “try again” as requests to use the connected LaTeX Workshop tools again. Do not require the user to repeat the product or project name. Start the follow-up with `list_projects`, resolve the prior displayed name against the fresh result, and continue from current site state rather than relying on stale ids or hashes.
 
@@ -22,18 +24,20 @@ Project placement is a first-class Library capability:
 
 For an existing project:
 
-1. Call `get_project_tree`, then read every relevant text file with `read_text_file`. Follow `nextOffset` until it is null and retain each file hash.
-2. Call `start_proposal`. Make all file changes inside that isolated proposal using complete file contents, accepted hashes as `baseHash`, the latest `expectedProposalRevision`, and a fresh UUID for each distinct mutation.
-3. Use `propose_structure` for file or folder moves, renames, and deletions. Proposal tools never change accepted source.
-4. Call `finish_proposal`; inspect the returned compile diagnostics and warnings. Correct failures or visible layout defects by revising and finishing again. Use `get_compile_page_images` for visual or layout-sensitive work.
-5. When the proposal is `reviewing`, tell the user it is ready—not accepted—and link the returned `reviewUrl`. Only the owner can accept changes in Mind Palace.
+1. Call `get_project_tree`, then read relevant text files with `read_text_file`. Follow `nextOffset` until null; restart if the hash changes between pages. Retain each current hash and the tree's `sourceRevision`.
+2. Call `edit_project` with complete resulting file contents, current hashes as `baseHash` (null means create-only), `expectedSourceRevision`, a short undo-history title, and a fresh UUID `idempotencyKey`. Use `structure` for folders, moves, renames, and deletions. Changes apply atomically and immediately, with no owner approval step. Write a file and move/delete that path in separate calls.
+3. Call `compile_project` and inspect returned diagnostics and warnings. Correct failures by rereading current files and editing again. Use `get_compile_page_images` with `projectId` and the successful job id for visual inspection. Use `get_project_compile` only when the compile wait is interrupted or still pending.
+4. Refresh relevant live files before each subsequent edit, including follow-ups across multiple messages. Current saved owner changes are visible; unsaved browser typing is not. On conflicts, reread, reconstruct against current content, and submit a fresh UUID. An identical transport retry reuses its original UUID and never applies twice.
+5. Report that changes are live and link the workspace. The owner can undo one file in Undo history or restore the labeled pre-edit checkpoint in Version history. Whole-project restore also replaces later saved changes. Checkpoints are retained for 30 days.
 
-Top-level projects and templates are Library items, not files. Use `create_project` for a new project or template and `rename_project` for a top-level rename. When creating from a source project or template, customize only the proposal returned for the new project.
+Use `start_proposal` and `finish_proposal` only when the user explicitly requests review before applying. Follow the server's `get_editing_guide` for that optional workflow and give the owner its `reviewUrl`; `reviewing` is not accepted.
+
+Top-level projects and templates are Library items, not files. Use `create_project` for a new project or template and `rename_project` for a top-level rename. When creating from a source project or template, customize only the newly created project with `edit_project`; seeded source is live by default. Set `reviewOnly=true` only for explicit review requests.
 
 For a new normal project, choose `folderId` and `tagIds` from the current Library and pass them in the initial `create_project` call. Honor explicit placement first; otherwise infer from the source/template, closely related project names, and established folder/tag usage. Prefer existing relevant folders and tags, avoid speculative or excessive tags, and leave the project at root or untagged when evidence is weak. Create a new folder or tag first only when the user's requested organization or a clear existing convention makes it appropriate. Templates stay in the Templates library unless the user explicitly asks for metadata the product supports.
 
 Library folder operations refer to top-level document projects, while `propose_structure` handles files and folders inside a project. Trashing a Library folder also trashes its subtree and contained granted projects; deleting a tag removes that tag assignment. State that consequence before invoking either destructive action. If the tool reports that ungranted projects would be affected, provide `manageAccessUrl` rather than working around the grant boundary.
 
-On `needs_rebase`, reread every conflicted accepted file, rewrite against the current hashes, compile again, and finish again. Use `get_proposal_compile` only to recover an interrupted compile wait.
+For optional proposals, `needs_rebase` means reread conflicts, rewrite against current hashes, and finish again. Never route a normal live edit through owner proposal approval.
 
 If the connected tools are unavailable, tell the user to install or enable the workspace LaTeX Workshop plugin in ChatGPT and authorize projects under **Mind Palace → Account settings → Agent access**. Describe this as a missing app connection, not a filesystem limitation.

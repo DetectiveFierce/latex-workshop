@@ -3,8 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { gunzipSync } from 'node:zlib';
-import { and, desc, eq, inArray, sql } from 'drizzle-orm';
+import { and, desc, eq } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import {
   compileRequestSchema,
@@ -12,24 +11,16 @@ import {
   inverseSyncRequestSchema,
   type PdfSyncResult,
 } from '@latex-workshop/contracts';
-import {
-  checkpoints,
-  compileJobs,
-  entries,
-  fileVersions,
-  projectMemberships,
-} from '@latex-workshop/db';
+import { checkpoints, compileJobs, entries, fileVersions } from '@latex-workshop/db';
 import type { AppContext } from '../lib/context.js';
 import { requireUser } from '../lib/context.js';
-import {
-  buildEntryPaths,
-  createCheckpoint,
-  getFileWithBlob,
-  requireProject,
-} from '../lib/domain.js';
-import { badRequest, conflict, notFound } from '../lib/errors.js';
+import { buildEntryPaths, getFileWithBlob, requireProject } from '../lib/domain.js';
+import { badRequest, notFound } from '../lib/errors.js';
 import { incrementMetric, observeMetric } from '../lib/operational-metrics.js';
 import { serializeCompile } from './projects.js';
+import { requestProjectCompilation } from '../lib/project-compiles.js';
+import { getSyncArtifact } from '../lib/synctex-artifacts.js';
+import { findInverseSource } from '../lib/inverse-search.js';
 import {
   alignSelectionToCompiled,
   contentHint,
@@ -48,79 +39,13 @@ export async function registerCompileRoutes(app: FastifyInstance, context: AppCo
   app.post('/api/v1/projects/:projectId/compilations', async (request, reply) => {
     const user = await requireUser(context, request);
     const { projectId } = request.params as { projectId: string };
-    const project = await requireProject(context.db, user.id, projectId);
-    if (!project.mainFileId) throw badRequest('Select a main .tex file before compiling');
-    const [main] = await context.db
-      .select()
-      .from(entries)
-      .where(and(eq(entries.id, project.mainFileId), eq(entries.projectId, projectId)))
-      .limit(1);
-    if (!main) throw badRequest('The selected main file no longer exists');
-    if (main.size === 0)
-      throw badRequest(
-        'The accepted main file is empty. Compile the active proposal or accept its changes first.',
-      );
-    const input = compileRequestSchema.parse(request.body ?? {});
-
-    const [userActive] = await context.db
-      .select({ count: sql<number>`count(*)::int` })
-      .from(compileJobs)
-      .innerJoin(projectMemberships, eq(projectMemberships.projectId, compileJobs.projectId))
-      .where(
-        and(
-          eq(projectMemberships.userId, user.id),
-          inArray(compileJobs.status, ['queued', 'running']),
-        ),
-      );
-    if ((userActive?.count ?? 0) >= 2)
-      throw conflict('Your compilation concurrency limit has been reached');
-
-    const [active] = await context.db
-      .select()
-      .from(compileJobs)
-      .where(
-        and(
-          eq(compileJobs.projectId, projectId),
-          inArray(compileJobs.status, ['queued', 'running']),
-        ),
-      )
-      .orderBy(desc(compileJobs.createdAt))
-      .limit(1);
-    if (active?.status === 'running' && input.trigger === 'auto')
-      return reply.code(202).send({ job: serializeCompile(active), coalesced: true });
-    if (active?.status === 'queued' && active.trigger === 'auto') {
-      await context.queue.remove(active.id).catch(() => undefined);
-      await context.db
-        .update(compileJobs)
-        .set({ status: 'cancelled', finishedAt: new Date() })
-        .where(eq(compileJobs.id, active.id));
-    } else if (active) {
-      throw conflict('A compilation is already running for this project');
-    }
-
-    const checkpoint = await createCheckpoint(context.db, projectId, 'compile');
-    const [job] = await context.db
-      .insert(compileJobs)
-      .values({
-        projectId,
-        checkpointId: checkpoint.id,
-        sourceRevision: checkpoint.sourceRevision,
-        engine: project.compiler,
-        trigger: input.trigger,
-      })
-      .returning();
-    await context.queue.add(
-      'compile',
-      { compileJobId: job!.id },
-      {
-        jobId: job!.id,
-        attempts: 2,
-        backoff: { type: 'fixed', delay: 1_000 },
-        removeOnComplete: 500,
-        removeOnFail: 500,
-      },
+    const result = await requestProjectCompilation(
+      context,
+      user.id,
+      projectId,
+      compileRequestSchema.parse(request.body ?? {}),
     );
-    return reply.code(202).send({ job: serializeCompile(job!) });
+    return reply.code(202).send(result);
   });
 
   app.get('/api/v1/projects/:projectId/compilations', async (request) => {
@@ -221,17 +146,20 @@ export async function registerCompileRoutes(app: FastifyInstance, context: AppCo
   });
 
   app.get('/api/v1/projects/:projectId/compilations/:jobId/download', async (request, reply) => {
+    const user = await requireUser(context, request);
     const { projectId, jobId } = request.params as { projectId: string; jobId: string };
-    reply.header('content-disposition', `attachment; filename="${projectId.slice(0, 8)}.pdf"`);
-    return app
-      .inject({
-        method: 'GET',
-        url: `/api/v1/projects/${projectId}/compilations/${jobId}/pdf`,
-        headers: request.headers as Record<string, string>,
-      })
-      .then((response) =>
-        reply.code(response.statusCode).headers(response.headers).send(response.rawPayload),
-      );
+    const project = await requireProject(context.db, user.id, projectId);
+    const job = await successfulJob(context, projectId, jobId);
+    const object = await context.storage.getStream(job.pdfObjectKey!, request.headers.range);
+    reply
+      .header('accept-ranges', 'bytes')
+      .header('content-type', 'application/pdf')
+      .header('content-disposition', pdfAttachmentDisposition(project.name))
+      .header('cache-control', 'private, no-store');
+    if (object.etag) reply.header('etag', object.etag);
+    if (object.contentRange) reply.code(206).header('content-range', object.contentRange);
+    if (object.contentLength !== undefined) reply.header('content-length', object.contentLength);
+    return reply.send(object.stream);
   });
 
   app.post('/api/v1/projects/:projectId/compilations/:jobId/synctex/forward', async (request) => {
@@ -274,10 +202,10 @@ export async function registerCompileRoutes(app: FastifyInstance, context: AppCo
       'utf8',
     );
     const syncData = job.synctexObjectKey
-      ? await context.storage.getBuffer(job.synctexObjectKey)
+      ? await getSyncArtifact(context.storage, job.synctexObjectKey)
       : null;
     const syncInput = syncData
-      ? findSyncTexInput(gunzipSync(syncData).toString('utf8'), manifestEntry.path)
+      ? findSyncTexInput(syncData.preamble, manifestEntry.path)
       : manifestEntry.path;
     const currentSource = currentEntry
       ? (
@@ -348,22 +276,30 @@ export async function registerCompileRoutes(app: FastifyInstance, context: AppCo
   app.post('/api/v1/projects/:projectId/compilations/:jobId/synctex/inverse', async (request) => {
     const user = await requireUser(context, request);
     const { projectId, jobId } = request.params as { projectId: string; jobId: string };
-    await requireProject(context.db, user.id, projectId);
+    const project = await requireProject(context.db, user.id, projectId);
     const parsed = inverseSyncRequestSchema.safeParse(request.body);
     if (!parsed.success) throw badRequest('Invalid PDF position', parsed.error.flatten());
     const input = parsed.data;
     const job = await successfulJob(context, projectId, jobId);
     requireSyncSource(job, input.source);
-    const output = await querySyncTex(context, job, [
-      'edit',
-      '-o',
-      `${input.page}:${input.x}:${input.y}:document.pdf`,
-    ]);
-    const record = parseSyncTexRecords(output)[0];
-    const path = record ? normalizeSyncPath(record.input) : null;
-    if (!record || !path || !record.line) throw notFound('No SyncTeX location found');
-    return { path, line: record.line, column: record.column };
+    return findInverseSource(context, project, job, input, (args) =>
+      querySyncTex(context, job, args),
+    );
   });
+}
+
+export function pdfAttachmentDisposition(projectName: string): string {
+  const filename = `${projectName}.pdf`;
+  const asciiFallback = filename
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^\x20-\x7e]/g, '_')
+    .replace(/["\\]/g, '_');
+  const encodedFilename = encodeURIComponent(filename).replace(
+    /[!'()*]/g,
+    (character) => `%${character.charCodeAt(0).toString(16).toUpperCase()}`,
+  );
+  return `attachment; filename="${asciiFallback}"; filename*=UTF-8''${encodedFilename}`;
 }
 
 async function successfulJob(context: AppContext, projectId: string, jobId: string) {
@@ -405,26 +341,17 @@ async function querySyncTex(
   if (!job.synctexObjectKey) throw notFound('SyncTeX data not found');
   const folder = await mkdtemp(join(tmpdir(), 'latex-synctex-'));
   try {
+    const artifact = await getSyncArtifact(context.storage, job.synctexObjectKey);
+    // SyncTeX reads its own artifact, not PDF contents or source placeholders.
     await Promise.all([
-      context.storage
-        .getBuffer(job.pdfObjectKey!)
-        .then((data) => writeFile(join(folder, 'document.pdf'), data)),
-      context.storage
-        .getBuffer(job.synctexObjectKey!)
-        .then((data) => writeFile(join(folder, 'document.synctex.gz'), data)),
+      writeFile(join(folder, 'document.pdf'), ''),
+      writeFile(join(folder, 'document.synctex.gz'), artifact.data),
     ]);
-    const [checkpoint] = await context.db
-      .select()
-      .from(checkpoints)
-      .where(eq(checkpoints.id, job.checkpointId));
-    for (const item of checkpoint?.manifest ?? []) {
-      const target = join(folder, item.path);
-      await import('node:fs/promises').then(async (fs) => {
-        await fs.mkdir(join(target, '..'), { recursive: true });
-        await fs.writeFile(target, '');
-      });
-    }
-    const result = await exec('synctex', args, { cwd: folder, timeout: 5_000 });
+    const result = await exec('synctex', args, {
+      cwd: folder,
+      timeout: 5_000,
+      maxBuffer: 256 * 1024,
+    });
     return result.stdout;
   } finally {
     await rm(folder, { recursive: true, force: true });

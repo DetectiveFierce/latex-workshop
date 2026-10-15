@@ -2,6 +2,22 @@ import { describe, expect, it } from 'vitest';
 import { forwardSyncRequestSchema, inverseSyncRequestSchema } from './pdf-sync.js';
 
 describe('SyncTeX source identity', () => {
+  it('bounds highlighted text, context, and geometric samples', () => {
+    const point = { page: 84, x: 100, y: 200 };
+    expect(
+      inverseSyncRequestSchema.parse({
+        ...point,
+        text: 'Highlighted words',
+        before: 'before',
+        after: 'after',
+        points: [point],
+      }).points,
+    ).toHaveLength(1);
+    expect(() => inverseSyncRequestSchema.parse({ ...point, text: 'x'.repeat(2_001) })).toThrow();
+    expect(() =>
+      inverseSyncRequestSchema.parse({ ...point, points: Array(7).fill(point) }),
+    ).toThrow();
+  });
   it('defaults legacy accepted-head requests to the accepted source', () => {
     const request = inverseSyncRequestSchema.parse({ page: 1, x: 10, y: 20 });
     expect(request.source).toEqual({ target: 'accepted' });

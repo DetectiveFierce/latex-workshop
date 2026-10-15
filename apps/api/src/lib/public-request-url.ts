@@ -18,8 +18,10 @@ export function localAuthJwksUrl(apiPort: number): string {
 }
 
 export function publicAppPageUrl(webOrigin: string, apiOrigin: string, path: string): string {
-  const origin = new URL(webOrigin).origin;
-  const basePath = new URL(apiOrigin).pathname.replace(/\/+$/, '');
+  const web = new URL(webOrigin);
+  const origin = web.origin;
+  const basePath =
+    web.pathname.replace(/\/+$/, '') || new URL(apiOrigin).pathname.replace(/\/+$/, '');
   const suffix = path.startsWith('/') ? path : `/${path}`;
   return `${origin}${basePath === '/' ? '' : basePath}${suffix}`;
 }
@@ -48,6 +50,21 @@ export function protectedResourceMetadataUrl(resource: string): string {
   url.search = '';
   url.hash = '';
   return url.href;
+}
+
+export function reachableProtectedResourceMetadataUrl(apiOrigin: string): string {
+  return new URL(pathAwareProtectedResourceMetadataPath(apiOrigin), new URL(apiOrigin).origin).href;
+}
+
+export function rewriteMcpResourceMetadataChallenge(
+  challenge: string,
+  resource: string,
+  apiOrigin: string,
+): string {
+  return challenge.replaceAll(
+    protectedResourceMetadataUrl(resource),
+    reachableProtectedResourceMetadataUrl(apiOrigin),
+  );
 }
 
 /** RFC 8414 / RFC 9728 discovery is origin-rooted even when the app lives under a subpath. */

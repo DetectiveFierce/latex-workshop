@@ -23,7 +23,11 @@ export function sha256(value: Uint8Array | string) {
   return createHash('sha256').update(value).digest('hex');
 }
 
-export async function requireProject(db: Database, userId: string, projectId: string) {
+export async function requireProject(
+  db: Database | DatabaseTransaction,
+  userId: string,
+  projectId: string,
+) {
   const [row] = await db
     .select({ project: projects, role: projectMemberships.role })
     .from(projects)
@@ -51,6 +55,14 @@ export async function requireLibraryFolder(db: Database, userId: string, folderI
   return folder;
 }
 
+// All accepted-source transactions lock the project before files/history. This also
+// makes a direct edit's revision check and safety checkpoint consistent with browser saves.
+export async function lockProjectHead(db: DatabaseTransaction, projectId: string) {
+  await db.execute(
+    sql`select ${projects.id} from ${projects} where ${projects.id} = ${projectId} for update`,
+  );
+}
+
 export async function storeFileVersion(
   db: Database,
   storage: ObjectStorage,
@@ -63,6 +75,7 @@ export async function storeFileVersion(
   await storage.put(objectKey, content, mimeType);
   const nextVersion = entry.version + 1;
   const [version] = await db.transaction(async (tx) => {
+    await lockProjectHead(tx, entry.projectId);
     await tx
       .insert(fileBlobs)
       .values({ hash, objectKey, size: content.byteLength })
@@ -120,6 +133,7 @@ export async function saveTextFileVersion(
   ) => Promise<void>,
 ): Promise<SaveTextVersionResult> {
   return db.transaction(async (tx) => {
+    await lockProjectHead(tx, projectId);
     await tx.execute(
       sql`select ${entries.id} from ${entries} where ${entries.id} = ${entryId} and ${entries.projectId} = ${projectId} for update`,
     );
@@ -215,14 +229,27 @@ export async function saveTextFileVersion(
 export async function createCheckpoint(
   db: Database | DatabaseTransaction,
   projectId: string,
-  reason: 'periodic' | 'compile' | 'import' | 'restore',
+  reason: 'periodic' | 'compile' | 'import' | 'restore' | 'proposal',
 ) {
   const manifest = await acceptedCheckpointManifest(db, projectId);
   const [project] = await db.select().from(projects).where(eq(projects.id, projectId)).limit(1);
   if (!project) throw notFound('Project not found');
+  const tree = await db.select().from(entries).where(eq(entries.projectId, projectId));
+  const paths = buildEntryPaths(tree);
+  const folderPaths = tree
+    .filter((entry) => entry.kind === 'folder')
+    .map((entry) => paths.get(entry.id) ?? entry.name);
+  const mainFilePath = project.mainFileId ? (paths.get(project.mainFileId) ?? null) : null;
   const [checkpoint] = await db
     .insert(checkpoints)
-    .values({ projectId, sourceRevision: project.sourceRevision, reason, manifest })
+    .values({
+      projectId,
+      sourceRevision: project.sourceRevision,
+      reason,
+      manifest,
+      folderPaths,
+      mainFilePath,
+    })
     .returning();
   return checkpoint!;
 }

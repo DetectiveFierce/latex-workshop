@@ -19,7 +19,7 @@
     "@latex-workshop/storage": "workspace:*",
     "better-auth": "1.7.4",
     "drizzle-orm": "0.45.2",
-    "fastify": "5.12.1",
+    "fastify": "5.12.5",
     "ws": "8.21.3"
   },
   "devDependencies": {

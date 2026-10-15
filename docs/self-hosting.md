@@ -131,6 +131,42 @@ connection stays authorized until the owner revokes it. Each machine keeps its o
 performs its own OAuth handshake; do not copy raw token-store files between devices. Reconnecting a
 known client preselects its existing project policy on the consent screen.
 
+## Automatic private agent authentication
+
+For a single owner's devices and private ChatGPT workspace tunnel, run on the host:
+
+```bash
+./infra/self-host/enable-private-mcp.sh owner@example.com
+```
+
+This provisions separate random ingress credentials, maps access to the existing verified account,
+and creates **My Tailscale devices** and **My private ChatGPT tunnel** connections with access to
+that owner's projects. Keys stay on the server. The command preserves existing credentials and
+connection policies. Rerunning it after deleting a connection explicitly provisions that connection
+again; normal requests and deployments never recreate revoked policies.
+
+Deploy with `pnpm deploy:production`. When private credentials are configured, deployment starts
+an isolated nginx listener published only at `127.0.0.1:8089`, adds Tailscale Serve HTTPS port 9443,
+and applies the tunnel's `compose.private.yml` override without changing its workspace association
+or audience. On each personal device, use `https://YOUR-HOST.ts.net:9443/api/mcp` without OAuth.
+Serve supplies the authenticated Tailscale login; only the configured owner's login is accepted.
+Tagged devices have no user login and are refused. Existing port 443 and service routes stay intact.
+
+The hosted tunnel keeps its original upstream URL. Its runtime adds a separate file-backed service
+credential to both discovery and tool requests. Authenticated private discovery advertises `noauth`
+tools because the transport has already authenticated. Configure the private ChatGPT app for
+**No authentication** and refresh its tools once when migrating from OAuth; no subsequent Workshop
+user login is needed. This mode is only for the existing private, owner-controlled tunnel, never a
+public or shared marketplace app.
+
+The API requires `AGENT_MCP_PRIVATE_OWNER_EMAIL` together with either or both 64-character hex
+`AGENT_MCP_TAILNET_KEY` and `AGENT_MCP_TUNNEL_KEY` settings. It validates credentials before resolving
+the account, requires a live connection policy, rejects browser Origin headers, and applies the
+same membership, project grants, quotas, and read/write rate limits as OAuth. Revoke either
+connection in Account settings → Agent access; deleting its policy or revoking its credentials
+immediately blocks it. A revoked private connection requires an explicit operator re-provision.
+The normal endpoint continues to require OAuth from clients without a private ingress credential.
+
 ## Backup and restore
 
 Run `infra/self-host/backup.sh` daily. It briefly drains the three write-producing application

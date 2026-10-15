@@ -156,6 +156,7 @@ describe('agent proposal contracts', () => {
         idempotencyKey: '55555555-5555-4555-8555-555555555555',
       }),
     ).toEqual({
+      reviewOnly: false,
       name: 'Homework',
       sourceProjectId: legacy.entryId,
       isTemplate: true,

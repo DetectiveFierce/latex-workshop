@@ -29,7 +29,11 @@ import {
 import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import 'pdfjs-dist/web/pdf_viewer.css';
 import { IconButton } from '../../components/Button';
-import { viewportPointToSync } from './pdfCoordinates';
+import {
+  clientPointToSync,
+  pdfSelectionLocation,
+  type PdfInverseLocation,
+} from './pdfInverseSelection.js';
 import { PdfHighlightManager } from './pdfHighlightManager';
 import {
   capturePdfViewport,
@@ -48,6 +52,7 @@ type OutlineItem =
 export function PdfViewer({
   url,
   downloadUrl,
+  downloadFilename,
   openUrl,
   storageKey,
   forwardLocation,
@@ -58,10 +63,11 @@ export function PdfViewer({
 }: {
   url: string;
   downloadUrl?: string;
+  downloadFilename?: string;
   openUrl?: string;
   storageKey?: string;
   forwardLocation?: PdfSyncResult | null;
-  onInverse?: (page: number, x: number, y: number) => void;
+  onInverse?: (location: PdfInverseLocation) => void;
   onCollapse?: () => void;
   onOpenExternal?: () => void;
   onPageChange?: (page: number) => void;
@@ -77,6 +83,10 @@ export function PdfViewer({
   const suppressPersistenceRef = useRef(true);
   const storageKeyRef = useRef(storageKey);
   const onPageChangeRef = useRef(onPageChange);
+  const onInverseRef = useRef(onInverse);
+  const selectingRef = useRef(false);
+  const loadedUrlRef = useRef<string | null>(null);
+  const selectionKeyRef = useRef('');
   const [documentProxy, setDocumentProxy] = useState<pdfjs.PDFDocumentProxy | null>(null);
   const [outline, setOutline] = useState<OutlineItem[]>([]);
   const [sidebar, setSidebar] = useState<'thumbnails' | 'outline' | null>(null);
@@ -92,6 +102,52 @@ export function PdfViewer({
 
   storageKeyRef.current = storageKey;
   onPageChangeRef.current = onPageChange;
+  onInverseRef.current = onInverse;
+
+  useEffect(() => {
+    let timer: number | null = null;
+    selectionKeyRef.current = '';
+    const readSelection = () => {
+      timer = null;
+      const container = containerRef.current;
+      if (
+        selectingRef.current ||
+        loadedUrlRef.current !== url ||
+        !container ||
+        !onInverseRef.current
+      )
+        return;
+      const location = pdfSelectionLocation(window.getSelection(), container, (index) =>
+        instanceRef.current?.getPageView(index),
+      );
+      if (!location) {
+        selectionKeyRef.current = '';
+        return;
+      }
+      const key = JSON.stringify(location);
+      if (key === selectionKeyRef.current) return;
+      selectionKeyRef.current = key;
+      onInverseRef.current(location);
+    };
+    const schedule = () => {
+      if (timer !== null) window.clearTimeout(timer);
+      timer = window.setTimeout(readSelection, 180);
+    };
+    const finish = () => {
+      if (!selectingRef.current) return;
+      selectingRef.current = false;
+      schedule();
+    };
+    document.addEventListener('selectionchange', schedule);
+    document.addEventListener('pointerup', finish, true);
+    document.addEventListener('pointercancel', finish, true);
+    return () => {
+      if (timer !== null) window.clearTimeout(timer);
+      document.removeEventListener('selectionchange', schedule);
+      document.removeEventListener('pointerup', finish, true);
+      document.removeEventListener('pointercancel', finish, true);
+    };
+  }, [url]);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -209,6 +265,7 @@ export function PdfViewer({
 
     let cancelled = false;
     const task = pdfjs.getDocument({ url, withCredentials: true });
+    loadedUrlRef.current = null;
     setError('');
     task.promise
       .then(async (document) => {
@@ -225,6 +282,7 @@ export function PdfViewer({
         const previousTask = activeTaskRef.current;
         activeTaskRef.current = task;
         viewer.setDocument(document);
+        loadedUrlRef.current = url;
         linkService.setDocument(document);
         setDocumentProxy(document);
         setPages(document.numPages);
@@ -297,20 +355,14 @@ export function PdfViewer({
     viewer.scrollMode = next ? ScrollMode.VERTICAL : ScrollMode.PAGE;
   };
   const inverse = (event: React.MouseEvent) => {
-    if (!(event.metaKey || event.ctrlKey) || !onInverse) return;
-    const target = (event.target as HTMLElement).closest('.page') as HTMLElement | null;
-    if (!target) return;
+    if (!(event.metaKey || event.ctrlKey) || !onInverse || loadedUrlRef.current !== url) return;
+    const target = event.target instanceof Element ? event.target.closest('.page') : null;
+    if (!(target instanceof HTMLElement)) return;
     const pageNumber = Number(target.dataset.pageNumber);
     const pageView = instanceRef.current?.getPageView(pageNumber - 1);
     if (!pageView?.viewport) return;
-    const rect = pageView.div.getBoundingClientRect();
-    const point = viewportPointToSync(
-      pageNumber,
-      event.clientX - rect.left,
-      event.clientY - rect.top,
-      pageView.viewport,
-    );
-    onInverse(point.page, point.x, point.y);
+    const point = clientPointToSync(pageNumber, event.clientX, event.clientY, pageView);
+    if (point) onInverse(point);
     window.requestAnimationFrame(() => window.getSelection()?.removeAllRanges());
   };
 
@@ -409,8 +461,12 @@ export function PdfViewer({
         </IconButton>
         <a
           className="icon-button"
-          href={downloadUrl ?? url}
-          download
+          href={
+            downloadUrl && downloadFilename
+              ? `${downloadUrl}?filename=${encodeURIComponent(downloadFilename)}`
+              : (downloadUrl ?? url)
+          }
+          download={downloadFilename ?? true}
           aria-label="Download PDF"
           title="Download PDF"
         >
@@ -492,9 +548,11 @@ export function PdfViewer({
           tabIndex={0}
           onDoubleClick={inverse}
           onPointerDown={(event) => {
+            selectingRef.current = event.button === 0;
+            if (selectingRef.current) selectionKeyRef.current = '';
             if (!(event.metaKey || event.ctrlKey)) highlightManagerRef.current?.clearSource();
           }}
-          aria-label="PDF document. Control or Command double-click for inverse search."
+          aria-label="PDF document. Select text to locate its source. Control or Command double-click also locates source."
           hidden={Boolean(error)}
         >
           <div className="pdfViewer" ref={viewerRef} />

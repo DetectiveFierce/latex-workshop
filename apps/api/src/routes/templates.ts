@@ -45,6 +45,7 @@ export async function registerTemplateRoutes(app: FastifyInstance, context: AppC
           .where(
             and(
               inArray(compileJobs.projectId, projectIds),
+              eq(compileJobs.target, 'accepted'),
               eq(compileJobs.status, 'succeeded'),
               isNotNull(compileJobs.pdfObjectKey),
             ),

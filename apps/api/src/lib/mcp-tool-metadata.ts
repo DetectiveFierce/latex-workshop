@@ -1,6 +1,7 @@
 export function mcpToolMetadata(
   kind: 'read' | 'write',
   options?: { destructive?: boolean; idempotent?: boolean },
+  authentication: 'oauth' | 'private' = 'oauth',
 ) {
   const scopes = kind === 'read' ? ['projects:read'] : ['projects:read', 'proposals:write'];
   return {
@@ -10,8 +11,10 @@ export function mcpToolMetadata(
       idempotentHint: options?.idempotent ?? true,
       openWorldHint: false,
     },
-    // OpenAI clients read this compatibility mirror while OAuth remains enforced by the
-    // protected-resource challenge and token verifier at the request boundary.
-    _meta: { securitySchemes: [{ type: 'oauth2', scopes }] },
+    // Private ingress authenticates the transport before tool discovery or execution.
+    _meta: {
+      securitySchemes:
+        authentication === 'private' ? [{ type: 'noauth' }] : [{ type: 'oauth2', scopes }],
+    },
   };
 }

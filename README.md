@@ -30,7 +30,7 @@ The compile worker launches short-lived TeX containers through the Docker socket
 ## Private AI agent access
 
 The optional Streamable HTTP MCP endpoint lets an OAuth-authenticated agent read selected projects
-and create reviewable proposals without writing accepted source directly. It is disabled by default.
+and edit source directly with undo history, or optionally create reviewable proposals. It is disabled by default.
 For a local test, set `AGENT_MCP_ENABLED=true` and connect an MCP client to
 `http://localhost:3001/api/mcp`. A public deployment sets `AGENT_MCP_RESOURCE_URL` to its canonical
 HTTPS `/api/mcp` URL. A private ChatGPT deployment uses Secure MCP Tunnel and sets it to the OpenAI
@@ -38,8 +38,9 @@ protected-resource URL printed by `infra/openai-mcp-tunnel/configure.sh`; the tu
 forwards to the private Tailscale `/api/mcp` URL.
 
 The OAuth consent screen asks the owner to choose projects. Active connections and grants can be
-changed or revoked under Account settings → Agent access. Agents can read source, build an isolated
-proposal, request a hardened proposal compile, and freeze it for review. The workspace shows live
+changed or revoked under Account settings → Agent access. Agents can read current source, apply atomic edits, compile live source, and inspect PDF pages.
+Each direct edit records file undo history and a labeled pre-edit project checkpoint.
+Optional proposals remain available for explicit review-first requests. The workspace shows live
 draft changes and a distinct proposal PDF; agents can request bounded images of specific compiled
 pages for visual inspection, and accepted hunks become normal versioned edits.
 
@@ -47,6 +48,10 @@ Account settings also exposes the canonical remote MCP URL. Add that same URL to
 Grok installation; each device authorizes once and stores its own rotating refresh credential. The
 server supplies current instructions, tool descriptions, and the editing-guide resource at runtime,
 so workflow updates do not need to be copied into every harness configuration.
+
+Owner-only Tailscale devices and the private ChatGPT tunnel can instead authenticate automatically
+through [private agent ingress](docs/self-hosting.md#automatic-private-agent-authentication), with
+separate revocable service connections and no recurring Workshop OAuth login.
 
 For ChatGPT on the web, use the repository workspace plugin instead of adding a raw MCP declaration:
 the plugin references a registered ChatGPT app and bundles the workflow that routes LaTeX Workshop
@@ -64,9 +69,8 @@ boundary details.
 
 In an MCP-connected conversation, **LaTeX Workshop project** means a project hosted on the Mind
 Palace site—not a local checkout and not the similarly named VS Code extension. The server publishes
-this identity in its initialization instructions and provides the `edit_latex_workshop_project`
-prompt plus the `mind-palace://latex-workshop/agent-editing-guide` resource for clients that expose
-MCP prompts and resources.
+this identity in initialization instructions, tool descriptions, and `get_editing_guide`, plus the
+`mind-palace://latex-workshop/agent-editing-guide` resource for clients that expose MCP resources.
 
 The endpoint serves both the current MCP transport and the stateless 2025 compatibility protocol
 negotiated by Codex. Keep both paths enabled when upgrading the MCP SDK; rejecting legacy protocol
@@ -80,17 +84,15 @@ tags so agents can follow the user's established Library organization when the e
 
 Agents can create and rename projects without a separate confirmation step. `create_project` can
 start from the standard blank document or the accepted source of any granted project, and it can
-mark the result as a personal template. The project metadata is created immediately, but every byte
-of seeded source is returned as a frozen review proposal; the new project contains only empty file
-skeletons until the owner accepts those hunks. `rename_project` changes only the displayed project
+mark the result as a personal template. Metadata and seeded source are live immediately by default. Set `reviewOnly=true` to keep seeded
+source isolated for owner review. `rename_project` changes only the displayed project
 name and takes effect immediately.
 
 The MCP instructions enforce a scope distinction: projects and templates are top-level Library
 items, while proposal file/structure tools operate only inside one project. A request to “create a
 template” must use `create_project` with `isTemplate=true`; it must never be implemented by adding a
 `.tex` file to the referenced source project. If a new item needs customized placeholders, the
-agent edits the proposal returned by `create_project`, not the project supplied as
-`sourceProjectId`. `list_projects` and `get_project_tree` repeat this rule in their results so it is
+agent edits the NEW project with `edit_project`, not the project supplied as `sourceProjectId`. `list_projects` and `get_project_tree` repeat this rule in their results so it is
 present at the point where the agent chooses its write tool.
 
 `finish_proposal` automatically compiles the frozen review revision and keeps the MCP request open
@@ -100,18 +102,23 @@ same for its initial content proposal. `compile_proposal` remains available for 
 preflight and also waits for its result; `get_proposal_compile` is the recovery path for interrupted
 or unusually long requests.
 
-For a normal request such as “Edit the LaTeX Workshop project _Research Notes_ and add the missing
-citation,” the agent lists granted projects, matches the name, inspects the tree, and reads the
-relevant accepted source. It then starts an isolated proposal and writes complete resulting files
-with the accepted hashes as drift guards. Each write uses the revision returned by the previous
-proposal operation.
+For a normal edit, list granted projects, inspect the current tree, and read relevant source.
+`edit_project` takes complete files with required current `baseHash` values (null means create-only),
+a fresh UUID, an undo-history title, and `expectedSourceRevision` from the tree. It applies the entire
+batch atomically. The response includes the new tree and `undoCheckpointId`. The owner can undo a
+single file in Undo history, or restore the labeled pre-edit checkpoint in Version history to undo
+files, moves, deletions and empty folders. Whole-project restore also replaces subsequent saved
+changes; checkpoints are retained for 30 days.
 
-For output-affecting edits, the agent requests a proposal compile and polls its status. Failed jobs
-return diagnostics and a bounded log so the agent can revise and recompile. Finally,
-`finish_proposal` freezes deterministic hunks. A `reviewing` result means the work is ready in the
-Mind Palace editor; the accepted project is unchanged until the owner accepts those hunks. A
-`needs_rebase` result tells the agent to reread the named conflicts, update the draft against the
-new hashes, compile again, and resubmit.
+Use `compile_project` for live-source verification and `get_project_compile` to recover an
+interrupted wait. `get_compile_page_images` accepts `projectId` for live builds or `proposalId` for
+review builds. Failed builds preserve the last successful PDF. Every follow-up edit rereads current
+saved source, including owner edits. On conflicts reread and reconstruct; never overwrite stale
+content. Identical transport retries reuse their UUID and do not apply twice. `get_editing_guide`
+exposes the complete workflow even when a client cannot read MCP resources.
+
+Proposal tools remain available when the user explicitly asks for review before applying.
+`finish_proposal` freezes and compiles the draft, and `reviewing` remains an owner handoff boundary.
 
 ## Repository map
 

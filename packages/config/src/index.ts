@@ -50,6 +50,24 @@ const envSchema = z.object({
   AGENT_MCP_ENABLED: bool.default(false),
   AGENT_MCP_RESOURCE_URL: optionalUrl,
   AGENT_MCP_DCR_ENABLED: bool.default(false),
+  AGENT_MCP_TAILNET_KEY: z.preprocess(
+    (value) => (value === '' ? undefined : value),
+    z
+      .string()
+      .regex(/^[a-f0-9]{64}$/)
+      .optional(),
+  ),
+  AGENT_MCP_TUNNEL_KEY: z.preprocess(
+    (value) => (value === '' ? undefined : value),
+    z
+      .string()
+      .regex(/^[a-f0-9]{64}$/)
+      .optional(),
+  ),
+  AGENT_MCP_PRIVATE_OWNER_EMAIL: z.preprocess(
+    (value) => (value === '' ? undefined : value),
+    z.email().optional(),
+  ),
   AGENT_MCP_ACCESS_TOKEN_TTL_SECONDS: positiveInteger.default(3_600),
   AGENT_MCP_REFRESH_TOKEN_TTL_DAYS: positiveInteger.max(3_650).default(365),
   AGENT_MCP_READS_PER_MINUTE: positiveInteger.default(120),
@@ -104,6 +122,13 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     new URL(config.AGENT_MCP_RESOURCE_URL ?? '').protocol !== 'https:'
   )
     throw new Error('AGENT_MCP_RESOURCE_URL must use HTTPS in production');
+  const privateAccessEnabled = Boolean(config.AGENT_MCP_TAILNET_KEY || config.AGENT_MCP_TUNNEL_KEY);
+  if (privateAccessEnabled !== Boolean(config.AGENT_MCP_PRIVATE_OWNER_EMAIL))
+    throw new Error(
+      'Private MCP keys and AGENT_MCP_PRIVATE_OWNER_EMAIL must be configured together',
+    );
+  if (privateAccessEnabled && !config.AGENT_MCP_ENABLED)
+    throw new Error('Private access requires AGENT_MCP_ENABLED=true');
   return config;
 }
 

@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { and, desc, eq, inArray, isNotNull, isNull, lt, notExists } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNotNull, isNull, lt, notExists, notInArray } from 'drizzle-orm';
 import {
   checkpoints,
   compileJobs,
@@ -12,6 +12,7 @@ import {
 } from '@latex-workshop/db';
 import type { AppContext } from './context.js';
 import { createCheckpoint } from './domain.js';
+import { queueMissingProjectPreview, retainedPreviewJobs } from './project-previews.js';
 
 const RETENTION_MS = 30 * 24 * 60 * 60 * 1_000;
 const CHECKPOINT_IDLE_MS = 5 * 60 * 1_000;
@@ -108,7 +109,13 @@ export async function runMaintenance(context: AppContext) {
         projectId: compileJobs.projectId,
       })
       .from(compileJobs)
-      .where(lt(compileJobs.createdAt, retentionCutoff));
+      .where(
+        and(
+          lt(compileJobs.createdAt, retentionCutoff),
+          notInArray(compileJobs.id, retainedPreviewJobs(context.db)),
+          inArray(compileJobs.status, ['succeeded', 'failed', 'cancelled']),
+        ),
+      );
     for (const job of expiredJobs) {
       await context.storage.deletePrefix(`artifacts/${job.projectId}/${job.id}/`);
     }
@@ -194,6 +201,7 @@ export async function runMaintenance(context: AppContext) {
         .returning({ objectKey: fileBlobs.objectKey });
       for (const blob of claimed) await context.storage.delete(blob.objectKey);
     }
+    await queueMissingProjectPreview(context, now);
   } finally {
     await context.redis.eval(
       "if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('del', KEYS[1]) else return 0 end",

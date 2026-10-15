@@ -13,6 +13,12 @@ values intentionally differ.
 
 For a publicly distributed plugin, verify production ingress instead. Public plugin submission requires a stable public HTTPS MCP endpoint; tunnel-backed apps are for private connections and developer-mode use.
 
+For an owner-only private connection that should never prompt for Workshop reauthentication, use
+[automatic private authentication](self-hosting.md#automatic-private-agent-authentication). The
+file-backed tunnel credential authenticates discovery and tool calls; set that private app to
+**No authentication** and refresh tools. Keep the existing tunnel/workspace association. Do not
+apply that mode to a shared or public app.
+
 ### Public ingress configuration
 
 Deploy with agent access enabled and the canonical public endpoint:
@@ -30,16 +36,23 @@ Replace the example hostname with the deployed Mind Palace origin. Route `/api/m
 1. In ChatGPT, enable **Settings → Security and login → Developer mode**.
 2. Open [ChatGPT Plugins](https://chatgpt.com/plugins), select the plus button, and create **Mind Palace LaTeX Workshop**. For a private deployment choose **Tunnel** and select the configured tunnel. For a public deployment, register the exact production `/api/mcp` URL.
 3. Choose CIMD rather than dynamic client registration. Complete the OAuth flow and grant a non-production test project.
-4. Exercise every tool and verify that `list_projects` returns `manageAccessUrl`, proposal handoff returns `reviewUrl`, and accepted source is unchanged until the owner accepts proposal hunks.
+4. Exercise every tool and verify that `list_projects` returns `manageAccessUrl`, `edit_project` applies live source with an undo checkpoint, repeated edits see owner changes, and optional proposal handoff returns `reviewUrl` without applying source.
 5. Copy the technical app id from the browser URL. It starts with `plugin_asdk_app_`.
 6. Replace `plugin_asdk_app_REPLACE_AFTER_CHATGPT_REGISTRATION` in `plugins/latex-workshop/.app.json` with that production app id. The id is deployment metadata, not a credential.
 
 ## 3. Import the workspace plugin
 
+The bundled skill explicitly enables `allow_implicit_invocation`. Its description and the MCP
+server instructions activate on LaTeX Workshop mentions or requests to edit or query LaTeX
+files, including follow-ups about an established file. Generic proof checking or math help
+alone does not activate the skill. Users do not need to invoke the skill explicitly.
+An enabled app and its existing project grants remain necessary; invocation
+rules do not bypass connection or authorization requirements.
+
 1. Push the repository revision containing `.agents/plugins/marketplace.json` and `plugins/latex-workshop` to GitHub.
 2. In **Admin → Plugins**, choose **Add → Import marketplace** and enter the repository URL. Leave **Path** empty because the marketplace is rooted at the repository root.
 3. Open the imported **LaTeX Workshop** plugin, enable its registered app, and set the installation policy to **Installed** for eligible roles. GitHub import does not apply repository policy values automatically.
-4. Set authentication to occur on first use. Allow read and proposal actions without repeated confirmation; require confirmation for the immediate `create_project` and `rename_project` metadata actions.
+4. Set authentication to occur on first use. Configure action policies to allow the authorized read, direct-edit, compile, creation, rename, and optional proposal workflows without repeated confirmations. The server handles undo checkpoints and compare-and-swap conflict protection. Client action policies are independent of server-side proposal review; changing the MCP alone does not override a client confirmation policy.
 5. On Enterprise/Edu, start with a pilot role. On Business, validate with workspace admins before enabling it for the workspace.
 
 ## 4. Acceptance check

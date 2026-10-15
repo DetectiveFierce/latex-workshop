@@ -8,6 +8,8 @@ import {
   publicAuthIssuerUrl,
   publicMcpResourceUrl,
   protectedResourceMetadataUrl,
+  reachableProtectedResourceMetadataUrl,
+  rewriteMcpResourceMetadataChallenge,
   publicRequestUrl,
   publicWellKnownUrl,
 } from './public-request-url.js';
@@ -73,6 +75,16 @@ describe('publicAppPageUrl', () => {
     ).toBe('https://mind-palace/latex-workshop/oauth/consent');
   });
 
+  it('preserves a frontend mount path when the API is hosted separately at root', () => {
+    expect(
+      publicAppPageUrl(
+        'http://localhost:5173/latex-workshop/',
+        'http://localhost:3001',
+        '/oauth/consent',
+      ),
+    ).toBe('http://localhost:5173/latex-workshop/oauth/consent');
+  });
+
   it('uses the web origin when the API is hosted at root', () => {
     expect(
       publicAppPageUrl('https://workshop.example.com', 'https://workshop.example.com', '/auth'),
@@ -132,6 +144,20 @@ describe('protectedResourceMetadataUrl', () => {
       protectedResourceMetadataUrl('https://tunnel-service.example/v1/mcp/tunnel_0123456789abcdef'),
     ).toBe(
       'https://tunnel-service.example/.well-known/oauth-protected-resource/v1/mcp/tunnel_0123456789abcdef',
+    );
+  });
+});
+
+describe('MCP metadata challenge for a tunneled resource', () => {
+  it('points discovery at the reachable Tailnet host while preserving the tunnel resource', () => {
+    const resource = 'https://tunnel-service.example/v1/mcp/tunnel_0123456789abcdef';
+    const apiOrigin = 'https://mind-palace.tail7e24aa.ts.net/latex-workshop';
+    const original = `Bearer resource_metadata="${protectedResourceMetadataUrl(resource)}", scope="projects:read"`;
+    expect(reachableProtectedResourceMetadataUrl(apiOrigin)).toBe(
+      'https://mind-palace.tail7e24aa.ts.net/.well-known/oauth-protected-resource/latex-workshop/api/mcp',
+    );
+    expect(rewriteMcpResourceMetadataChallenge(original, resource, apiOrigin)).toBe(
+      `Bearer resource_metadata="${reachableProtectedResourceMetadataUrl(apiOrigin)}", scope="projects:read"`,
     );
   });
 });

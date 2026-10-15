@@ -5,7 +5,6 @@ import { DiffEditor } from '@monaco-editor/react';
 import { del, get, set } from 'idb-keyval';
 import {
   ArrowLeft,
-  ChevronDown,
   ChevronLeft,
   ChevronRight,
   CircleAlert,
@@ -44,9 +43,8 @@ import type {
   ProjectEntry,
   ShortcutActionId,
   SourceSelection,
-  AgentProposalChange,
 } from '@latex-workshop/contracts';
-import { shortcutRegistry } from '@latex-workshop/contracts';
+import { inverseSyncResultSchema, shortcutRegistry } from '@latex-workshop/contracts';
 import { Button, IconButton } from '../components/Button';
 import { AppearanceMenu } from '../components/AppearanceMenu';
 import { Dialog } from '../components/Dialog';
@@ -61,6 +59,8 @@ import {
   type SaveState,
 } from '../features/editor/EditorPane';
 import type { TexLabStatus } from '../features/editor/lspClient';
+import { PdfSyncRequests } from '../features/pdf/pdfSyncRequests.js';
+import type { PdfInverseLocation } from '../features/pdf/pdfInverseSelection.js';
 import { PdfViewer } from '../features/pdf/PdfViewer';
 import {
   currentPdfSyncResult,
@@ -98,6 +98,8 @@ import { api, appPath, queryKeys } from '../lib/api';
 import { authClient } from '../lib/auth';
 import { prefersTouchWorkspace, TOUCH_WORKSPACE_MEDIA } from '../lib/layout';
 import { projectDocumentTitle } from '../lib/document-title';
+import { FileTree } from '../features/files/FileTree.js';
+import { ProjectTitleControl } from '../features/settings/ProjectTitleControl';
 import { classNames, formatRelative, isTextFile } from '../lib/utils';
 import { useAppearance } from '../lib/appearance';
 import {
@@ -235,7 +237,8 @@ export default function WorkspacePage() {
   const autoCompileAttempted = useRef<string | null>(null);
   const autoCompileRequestPending = useRef(false);
   const manualCompile = useRef(false);
-  const syncRequestRef = useRef<{ id: number; controller: AbortController } | null>(null);
+  const syncRequests = useRef(new PdfSyncRequests());
+  const currentSyncCompilation = useRef<string | null>(null);
   const lastForwardSelectionRef = useRef<SourceSelection | null>(null);
   const editHistoriesRef = useRef<Record<string, EditHistoryResponse>>({});
 
@@ -252,7 +255,7 @@ export default function WorkspacePage() {
   useEffect(
     () => () => {
       if (autoCompileTimer.current) clearTimeout(autoCompileTimer.current);
-      syncRequestRef.current?.controller.abort();
+      syncRequests.current.cancel();
       disposeProjectEditors(projectId);
     },
     [projectId],
@@ -381,6 +384,10 @@ export default function WorkspacePage() {
           proposalId: null,
           acceptedFallback: acceptedCompile,
         });
+  currentSyncCompilation.current = successfulCompile?.id ?? null;
+  useEffect(() => {
+    syncRequests.current.cancel();
+  }, [successfulCompile?.id]);
   const activeCompile =
     compileQuery.data?.jobs.find((job) => job.status === 'queued' || job.status === 'running') ??
     null;
@@ -418,6 +425,27 @@ export default function WorkspacePage() {
       entries.find((entry) => entry.kind === 'file');
     if (initial) void openEntry(initial);
   }, [payload?.project.id]);
+
+  useEffect(() => {
+    let cancelled = false;
+    for (const entry of entries) {
+      const cached = contents[entry.id];
+      const state = saveStates[entry.id];
+      if (!cached || entry.version <= cached.version || (state && state !== 'saved')) continue;
+      void api<FileContent>(`/api/v1/projects/${projectId}/entries/${entry.id}/content`)
+        .then((fresh) => {
+          if (cancelled) return;
+          setContents((current) =>
+            current[entry.id] === cached ? { ...current, [entry.id]: fresh } : current,
+          );
+          void loadEditHistory(entry.id, true);
+        })
+        .catch(() => undefined);
+    }
+    return () => {
+      cancelled = true;
+    };
+  }, [entries, contents, saveStates, projectId]);
 
   useEffect(() => {
     if (!payload) return;
@@ -655,6 +683,7 @@ export default function WorkspacePage() {
         switchTab(1);
         break;
       case 'workspace.togglePreview':
+        syncRequests.current.cancel();
         setPreviewVisible((value) => !value);
         break;
       case 'workspace.closeTab':
@@ -675,10 +704,11 @@ export default function WorkspacePage() {
     }
   }
 
-  function openProposalPath(path: string) {
+  function openProposalPath(path: string, preservePdfLookup = false) {
+    if (!preservePdfLookup) syncRequests.current.cancel();
     const entry = entries.find((item) => paths.get(item.id) === path);
     if (entry) {
-      void openEntry(entry);
+      void openEntry(entry, preservePdfLookup);
       return;
     }
     const virtual = agentProposal.virtualFiles.find((file) => file.path === path);
@@ -691,7 +721,8 @@ export default function WorkspacePage() {
     setContents((value) => (value[id] ? value : { ...value, [id]: { content: '', version: 0 } }));
   }
 
-  async function openEntry(entry: ProjectEntry) {
+  async function openEntry(entry: ProjectEntry, preservePdfLookup = false) {
+    if (!preservePdfLookup) syncRequests.current.cancel();
     setSelectedId(entry.id);
     setProposalOpenPath(paths.get(entry.id) ?? null);
     if (entry.kind !== 'file') return;
@@ -1308,47 +1339,47 @@ export default function WorkspacePage() {
     onError: (error) => setToast({ id: Date.now(), tone: 'error', message: error.message }),
   });
 
-  async function createEntry(kind: 'file' | 'folder') {
+  async function createEntry(kind: 'file' | 'folder', entry = selected) {
     setEntryDialogError(null);
     setEntryDialog({
       mode: kind === 'file' ? 'create-file' : 'create-folder',
       value: kind === 'file' ? 'chapter.tex' : 'chapters',
-      parentId: selected?.kind === 'folder' ? selected.id : (selected?.parentId ?? null),
+      parentId: entry?.kind === 'folder' ? entry.id : (entry?.parentId ?? null),
     });
   }
-  function renameEntry() {
-    if (!selected) return;
+  function renameEntry(entry = selected) {
+    if (!entry) return;
     setEntryDialogError(null);
     setEntryDialog({
       mode: 'rename',
-      entryId: selected.id,
-      value: selected.name,
-      parentId: selected.parentId,
+      entryId: entry.id,
+      value: entry.name,
+      parentId: entry.parentId,
     });
   }
-  function duplicateEntry() {
-    if (!selected) return;
-    mutateEntry.mutate({ id: `${selected.id}/duplicate`, method: 'POST' });
+  function duplicateEntry(entry = selected) {
+    if (!entry) return;
+    mutateEntry.mutate({ id: `${entry.id}/duplicate`, method: 'POST' });
   }
-  function deleteEntry() {
-    if (!selected) return;
+  function deleteEntry(entry = selected) {
+    if (!entry) return;
     setEntryDialogError(null);
     setEntryDialog({
       mode: 'delete',
-      entryId: selected.id,
-      value: selected.name,
-      parentId: selected.parentId,
+      entryId: entry.id,
+      value: entry.name,
+      parentId: entry.parentId,
     });
   }
 
-  function moveEntry() {
-    if (!selected) return;
+  function moveEntry(entry = selected) {
+    if (!entry) return;
     setEntryDialogError(null);
     setEntryDialog({
       mode: 'move',
-      entryId: selected.id,
-      value: selected.name,
-      parentId: selected.parentId,
+      entryId: entry.id,
+      value: entry.name,
+      parentId: entry.parentId,
     });
   }
 
@@ -1476,12 +1507,7 @@ export default function WorkspacePage() {
       after: currentLine.slice(Math.max(0, cursor.column - 1)),
     };
     lastForwardSelectionRef.current = sourceSelection;
-    syncRequestRef.current?.controller.abort();
-    const request = {
-      id: (syncRequestRef.current?.id ?? 0) + 1,
-      controller: new AbortController(),
-    };
-    syncRequestRef.current = request;
+    const request = syncRequests.current.start(successfulCompile.id);
     try {
       const result = await api<PdfSyncResult>(
         `/api/v1/projects/${projectId}/compilations/${successfulCompile.id}/synctex/forward`,
@@ -1504,7 +1530,7 @@ export default function WorkspacePage() {
           }),
         },
       );
-      if (syncRequestRef.current?.id !== request.id) return;
+      if (!syncRequests.current.isCurrent(request, currentSyncCompilation.current)) return;
       setForward({ compilationId: successfulCompile.id, result });
       setPreviewVisible(true);
       setMobilePanel('preview');
@@ -1519,48 +1545,76 @@ export default function WorkspacePage() {
   }
   useEffect(() => {
     if (
+      previewVisible &&
       shouldRefreshPdfSync(forward, successfulCompile?.id ?? null) &&
       lastForwardSelectionRef.current
     )
       void forwardSearch(lastForwardSelectionRef.current);
-  }, [forward?.compilationId, successfulCompile?.id]);
+  }, [forward?.compilationId, successfulCompile?.id, previewVisible]);
 
-  async function inverseSearch(page: number, x: number, y: number) {
+  async function inverseSearch(location: PdfInverseLocation) {
     if (!successfulCompile) return;
+    const request = syncRequests.current.start(successfulCompile.id);
     try {
-      const result = await api<{ path: string; line: number }>(
-        `/api/v1/projects/${projectId}/compilations/${successfulCompile.id}/synctex/inverse`,
-        {
-          method: 'POST',
-          body: JSON.stringify({
-            page,
-            x,
-            y,
-            source:
-              successfulCompile.target === 'proposal'
-                ? {
-                    target: 'proposal',
-                    proposalId: successfulCompile.proposalId,
-                    proposalRevision: successfulCompile.proposalRevision,
-                  }
-                : { target: 'accepted' },
-          }),
-        },
+      await saveCurrentRef.current?.();
+      if (!syncRequests.current.isCurrent(request, currentSyncCompilation.current)) return;
+      const result = inverseSyncResultSchema.parse(
+        await api<unknown>(
+          `/api/v1/projects/${projectId}/compilations/${successfulCompile.id}/synctex/inverse`,
+          {
+            method: 'POST',
+            signal: request.controller.signal,
+            body: JSON.stringify({
+              ...location,
+              source:
+                successfulCompile.target === 'proposal'
+                  ? {
+                      target: 'proposal',
+                      proposalId: successfulCompile.proposalId,
+                      proposalRevision: successfulCompile.proposalRevision,
+                    }
+                  : { target: 'accepted' },
+            }),
+          },
+        ),
       );
-      const target = entries.find(
-        (entry) =>
-          paths.get(entry.id) === result.path || result.path.endsWith(`/${paths.get(entry.id)}`),
+      if (!syncRequests.current.isCurrent(request, currentSyncCompilation.current)) return;
+      const target = entries.find((entry) =>
+        result.entryId ? entry.id === result.entryId : paths.get(entry.id) === result.path,
       );
-      if (target) {
-        await openEntry(target);
-        setNavigation((old) => ({ line: result.line, token: (old?.token ?? 0) + 1 }));
-        setMobilePanel('editor');
-      } else if (agentProposal.virtualFiles.some((file) => file.path === result.path)) {
-        openProposalPath(result.path);
-        setNavigation((old) => ({ line: result.line, token: (old?.token ?? 0) + 1 }));
-        setMobilePanel('editor');
+      if (
+        successfulCompile.target === 'proposal' &&
+        agentProposal.virtualFiles.some((file) => file.path === result.path)
+      ) {
+        openProposalPath(result.path, true);
+      } else if (target) {
+        await openEntry(target, true);
+      } else {
+        throw new Error(
+          'The source file has moved or been deleted. Recompile to update its PDF location.',
+        );
       }
+      if (!syncRequests.current.isCurrent(request, currentSyncCompilation.current)) return;
+      const selection = result.selection;
+      setNavigation((old) => ({
+        line: result.line,
+        token: (old?.token ?? 0) + 1,
+        ...(selection
+          ? {
+              selections: [
+                {
+                  startLine: selection.start.line,
+                  startColumn: selection.start.column,
+                  endLine: selection.end.line,
+                  endColumn: selection.end.column,
+                },
+              ],
+            }
+          : {}),
+      }));
+      setMobilePanel('editor');
     } catch (error) {
+      if (!syncRequests.current.isCurrent(request, currentSyncCompilation.current)) return;
       setToast({
         id: Date.now(),
         tone: 'error',
@@ -1663,7 +1717,21 @@ export default function WorkspacePage() {
         </Link>
         <div className="project-title">
           <Code2 size={17} />
-          <span>{payload.project.name}</span>
+          <ProjectTitleControl
+            key={projectId}
+            projectId={projectId}
+            name={payload.project.name}
+            onRenamed={(name) => {
+              queryClient.setQueryData<ProjectPayload>(queryKeys.project(projectId), (current) =>
+                current ? { ...current, project: { ...current.project, name } } : current,
+              );
+              void queryClient.invalidateQueries({ queryKey: queryKeys.project(projectId) });
+              void queryClient.invalidateQueries({ queryKey: ['library'] });
+              void queryClient.invalidateQueries({ queryKey: ['projects'] });
+              void queryClient.invalidateQueries({ queryKey: queryKeys.templates });
+            }}
+            onError={(message) => setToast({ id: Date.now(), tone: 'error', message })}
+          />
           {payload.project.isTemplate && <span className="badge">Template</span>}
           {successfulCompile &&
             successfulCompile.sourceRevision < payload.project.sourceRevision && (
@@ -1788,6 +1856,11 @@ export default function WorkspacePage() {
               proposalChanges={activeProposal?.changes ?? []}
               selectedId={selectedId}
               onSelect={(entry) => void openEntry(entry)}
+              onCreate={(kind, entry) => void createEntry(kind, entry)}
+              onRename={renameEntry}
+              onDuplicate={duplicateEntry}
+              onDelete={deleteEntry}
+              onRequestMove={moveEntry}
               onMove={(entryId, parentId) =>
                 mutateEntry.mutate({ id: entryId, method: 'PATCH', body: { parentId } })
               }
@@ -1812,16 +1885,16 @@ export default function WorkspacePage() {
           </div>
           {selected && (
             <div className="file-actions">
-              <Button variant="ghost" onClick={renameEntry}>
+              <Button variant="ghost" onClick={() => renameEntry()}>
                 <Pencil size={14} /> Rename
               </Button>
-              <Button variant="ghost" onClick={duplicateEntry}>
+              <Button variant="ghost" onClick={() => duplicateEntry()}>
                 <Copy size={14} /> Duplicate
               </Button>
-              <Button variant="ghost" onClick={moveEntry}>
+              <Button variant="ghost" onClick={() => moveEntry()}>
                 <FolderInput size={14} /> Move
               </Button>
-              <Button variant="ghost" onClick={deleteEntry}>
+              <Button variant="ghost" onClick={() => deleteEntry()}>
                 <Trash2 size={14} /> Delete
               </Button>
             </div>
@@ -2149,19 +2222,22 @@ export default function WorkspacePage() {
           {previewUrl ? (
             <PdfViewer
               url={previewUrl}
+              downloadFilename={`${payload.project.name}.pdf`}
               downloadUrl={appPath(
                 `/api/v1/projects/${projectId}/compilations/${successfulCompile!.id}/download`,
               )}
               openUrl={appPath(`/projects/${projectId}/pdf/${successfulCompile!.id}`)}
               storageKey={projectId}
               forwardLocation={currentPdfSyncResult(forward, successfulCompile!.id)}
-              onInverse={(page, x, y) => void inverseSearch(page, x, y)}
+              onInverse={(location) => void inverseSearch(location)}
               onCollapse={() => {
+                syncRequests.current.cancel();
                 setPreviewVisible(false);
                 setMobilePanel('editor');
                 focusEditorRef.current?.();
               }}
               onOpenExternal={() => {
+                syncRequests.current.cancel();
                 setPreviewVisible(false);
                 setMobilePanel('editor');
                 window.setTimeout(() => focusEditorRef.current?.());
@@ -2532,154 +2608,6 @@ function CommandPalette({
   );
 }
 
-function FileTree({
-  entries,
-  proposalChanges,
-  selectedId,
-  onSelect,
-  onMove,
-}: {
-  entries: ProjectEntry[];
-  proposalChanges: AgentProposalChange[];
-  selectedId: string | null;
-  onSelect: (entry: ProjectEntry) => void;
-  onMove: (id: string, parentId: string | null) => void;
-}) {
-  const [expanded, setExpanded] = useState<Set<string>>(
-    () => new Set(entries.filter((entry) => entry.kind === 'folder').map((entry) => entry.id)),
-  );
-  const proposalByEntry = new Map(
-    proposalChanges.filter((change) => change.entryId).map((change) => [change.entryId, change]),
-  );
-  const children = (parentId: string | null) =>
-    entries
-      .filter((entry) => entry.parentId === parentId)
-      .sort((a, b) =>
-        a.kind === b.kind ? a.name.localeCompare(b.name) : a.kind === 'folder' ? -1 : 1,
-      );
-  const render = (parentId: string | null, depth = 0): React.ReactNode =>
-    children(parentId).map((entry) => (
-      <div key={entry.id}>
-        <button
-          type="button"
-          role="treeitem"
-          data-entry-id={entry.id}
-          data-parent-id={entry.parentId ?? undefined}
-          aria-level={depth + 1}
-          aria-selected={selectedId === entry.id}
-          aria-expanded={entry.kind === 'folder' ? expanded.has(entry.id) : undefined}
-          tabIndex={
-            selectedId === entry.id ||
-            (!selectedId && depth === 0 && children(null)[0]?.id === entry.id)
-              ? 0
-              : -1
-          }
-          className={classNames(
-            'tree-row',
-            selectedId === entry.id && 'selected',
-            proposalByEntry.get(entry.id)?.operation === 'delete' && 'proposal-deleted',
-          )}
-          style={{ paddingLeft: 7 + depth * 14 }}
-          draggable
-          onDragStart={(event) => event.dataTransfer.setData('text/entry-id', entry.id)}
-          onDragOver={(event) => {
-            if (entry.kind === 'folder') event.preventDefault();
-          }}
-          onDrop={(event) => {
-            event.preventDefault();
-            const id = event.dataTransfer.getData('text/entry-id');
-            if (id && id !== entry.id && entry.kind === 'folder') onMove(id, entry.id);
-          }}
-          onClick={() => {
-            onSelect(entry);
-            if (entry.kind === 'folder')
-              setExpanded((old) => {
-                const next = new Set(old);
-                if (next.has(entry.id)) next.delete(entry.id);
-                else next.add(entry.id);
-                return next;
-              });
-          }}
-          onKeyDown={(event) => {
-            const root = event.currentTarget.closest('[role="tree"]');
-            const rows = root
-              ? Array.from(root.querySelectorAll<HTMLElement>('[role="treeitem"]'))
-              : [];
-            const index = rows.indexOf(event.currentTarget);
-            const focusAt = (next: number) =>
-              rows[Math.max(0, Math.min(rows.length - 1, next))]?.focus();
-            if (event.key === 'ArrowDown') {
-              event.preventDefault();
-              focusAt(index + 1);
-            } else if (event.key === 'ArrowUp') {
-              event.preventDefault();
-              focusAt(index - 1);
-            } else if (event.key === 'Home') {
-              event.preventDefault();
-              focusAt(0);
-            } else if (event.key === 'End') {
-              event.preventDefault();
-              focusAt(rows.length - 1);
-            } else if (event.key === 'ArrowRight' && entry.kind === 'folder') {
-              event.preventDefault();
-              if (!expanded.has(entry.id)) setExpanded((old) => new Set(old).add(entry.id));
-              else
-                window.setTimeout(() =>
-                  root?.querySelector<HTMLElement>(`[data-parent-id="${entry.id}"]`)?.focus(),
-                );
-            } else if (event.key === 'ArrowLeft') {
-              event.preventDefault();
-              if (entry.kind === 'folder' && expanded.has(entry.id))
-                setExpanded((old) => {
-                  const next = new Set(old);
-                  next.delete(entry.id);
-                  return next;
-                });
-              else if (entry.parentId)
-                root?.querySelector<HTMLElement>(`[data-entry-id="${entry.parentId}"]`)?.focus();
-            }
-          }}
-        >
-          {entry.kind === 'folder' ? (
-            <>
-              {expanded.has(entry.id) ? (
-                <ChevronDown className="chevron" size={13} />
-              ) : (
-                <ChevronRight className="chevron" size={13} />
-              )}
-              {expanded.has(entry.id) ? <FolderOpen size={15} /> : <Folder size={15} />}
-            </>
-          ) : (
-            <>
-              <span style={{ width: 13 }} />
-              {entry.mimeType?.startsWith('image/') ? <FileImage size={15} /> : <File size={15} />}
-            </>
-          )}
-          <span>{entry.name}</span>
-          {proposalByEntry.get(entry.id) && (
-            <span className="badge proposal-tree-badge">
-              {proposalByEntry.get(entry.id)?.operation.replace('_file', '').replace('_', ' ')}
-            </span>
-          )}
-        </button>
-        {entry.kind === 'folder' && expanded.has(entry.id) && render(entry.id, depth + 1)}
-      </div>
-    ));
-  return (
-    <div
-      role="tree"
-      aria-label="Project files"
-      onDragOver={(event) => event.preventDefault()}
-      onDrop={(event) => {
-        const id = event.dataTransfer.getData('text/entry-id');
-        if (id) onMove(id, null);
-      }}
-    >
-      {render(null)}
-    </div>
-  );
-}
-
 function EditHistoryDialog({
   open,
   onOpenChange,
@@ -2941,7 +2869,7 @@ function HistoryDialog({
         open={open}
         onOpenChange={onOpenChange}
         title="Version history"
-        description="Automatic and compile checkpoints are retained for 30 days."
+        description="Every agent edit saves a checkpoint here. Select it and restore to undo the edit. Checkpoints are retained for 30 days."
         wide
       >
         <div className="history-layout">
@@ -2963,7 +2891,7 @@ function HistoryDialog({
                   className={classNames('history-item', selected === checkpoint.id && 'active')}
                   onClick={() => setSelected(checkpoint.id)}
                 >
-                  {checkpoint.reason}
+                  {checkpoint.label ? `Before agent edit: ${checkpoint.label}` : checkpoint.reason}
                   <small>
                     {formatRelative(checkpoint.createdAt)} · rev {checkpoint.sourceRevision}
                   </small>

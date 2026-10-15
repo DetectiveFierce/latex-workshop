@@ -239,8 +239,10 @@ export function alignSelectionToCompiled(
     start,
     end,
     text: selected,
-    before: lineContent.slice(0, start.column - 1),
-    after: lineContent.slice(end.line === start.line ? end.column - 1 : lineContent.length),
+    before: lineContent.slice(0, start.column - 1).slice(-200),
+    after: lineContent
+      .slice(end.line === start.line ? end.column - 1 : lineContent.length)
+      .slice(0, 200),
   };
 }
 

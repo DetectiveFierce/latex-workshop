@@ -3,7 +3,7 @@
     {
       "name": "direct edit",
       "prompt": "Edit the LaTeX Workshop project Research Notes and add the missing citation.",
-      "expect": "Use list_projects, complete a compiled proposal, and return reviewUrl."
+      "expect": "Use list_projects, read current files, apply edit_project, compile_project and report live changes with undo available."
     },
     {
       "name": "indirect Mind Palace edit",
@@ -13,12 +13,29 @@
     {
       "name": "follow-up edit",
       "prompt": "Now tighten the conclusion in that same project.",
-      "expect": "Activate the Mind Palace LaTeX Workshop tools again despite the omitted product and project names; call list_projects, resolve the previously named project from fresh results, reread relevant accepted source, and create a new proposal revision."
+      "expect": "Activate the Mind Palace LaTeX Workshop tools again despite the omitted product and project names; call list_projects, resolve the previously named project from fresh results, reread relevant accepted source, and apply edit_project against current hashes and sourceRevision."
     },
     {
       "name": "follow-up retry",
       "prompt": "Try that again and compile it this time.",
       "expect": "Keep the Mind Palace connection active from conversation context, call list_projects again, recover current project state, and complete the compile workflow without asking the user to re-enable the plugin."
+    },
+    {
+      "name": "implicit source lookup",
+      "context": "No Workshop or LaTeX file has been requested.",
+      "prompt": "What does my main.tex file say about compactness?",
+      "expect": "Select Workshop implicitly because this queries a LaTeX file without invoking the skill. Resolve the accessible project and read its current source; do not change files."
+    },
+    {
+      "name": "implicit authorized edit",
+      "context": "Earlier messages established the Mind Palace project Research Notes and the user requested a proof correction.",
+      "prompt": "Apply that correction and make sure it compiles.",
+      "expect": "Use Workshop tools from prior context without asking to invoke the skill again. Refresh current files, edit_project with current hashes and revision, then compile_project."
+    },
+    {
+      "name": "generic proof checking",
+      "prompt": "Check my proof.",
+      "expect": "Do not activate the Workshop skill or query its tools solely for generic proof checking. Use the proof supplied in chat or request the missing proof."
     },
     {
       "name": "missing grant",
@@ -58,12 +75,12 @@
     {
       "name": "local tex file",
       "prompt": "Edit ./paper.tex in this local repository.",
-      "expect": "Do not activate the Mind Palace workflow unless the user identifies it as a LaTeX Workshop project."
+      "expect": "Select the skill for the LaTeX file request, honor the explicit local repository path, and edit with local tools rather than querying the hosted Workshop."
     },
     {
       "name": "VS Code extension",
       "prompt": "How do I configure the VS Code LaTeX Workshop extension?",
-      "expect": "Do not activate the Mind Palace workflow."
+      "expect": "Recognize the Workshop mention, honor the explicit VS Code extension choice, and answer about that extension without querying hosted Mind Palace projects."
     }
   ]
 }

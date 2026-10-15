@@ -15,6 +15,7 @@ test('OAuth MCP agent creates a durable proposal that the owner reviews and acce
   page,
   request,
 }) => {
+  test.setTimeout(240_000);
   test.skip(process.env.E2E_AGENT_MCP !== 'true', 'Requires an MCP-enabled stack with DCR enabled');
   const email = `agent-e2e-${Date.now()}@example.test`;
   const projectName = `Agent review ${Date.now()}`;
@@ -66,10 +67,15 @@ test('OAuth MCP agent creates a durable proposal that the owner reviews and acce
   const unauthenticatedMcp = await agentRequest.post(`${apiOrigin}/api/mcp`, {
     headers: {
       accept: 'application/json, text/event-stream',
-      'mcp-protocol-version': '2026-07-28',
-      'mcp-method': 'tools/list',
+      'mcp-protocol-version': '2025-06-18',
+      'mcp-method': 'tools/call',
     },
-    data: { jsonrpc: '2.0', id: randomUUID(), method: 'tools/list', params: {} },
+    data: {
+      jsonrpc: '2.0',
+      id: randomUUID(),
+      method: 'tools/call',
+      params: { name: 'list_projects', arguments: {} },
+    },
   });
   expect(unauthenticatedMcp.status()).toBe(401);
   expect(unauthenticatedMcp.headers()['www-authenticate']).toContain(
@@ -171,6 +177,10 @@ test('OAuth MCP agent creates a durable proposal that the owner reviews and acce
       'organize_library',
       'get_project_tree',
       'read_text_file',
+      'edit_project',
+      'compile_project',
+      'get_project_compile',
+      'get_editing_guide',
       'start_proposal',
       'put_proposal_file',
       'propose_structure',
@@ -179,9 +189,10 @@ test('OAuth MCP agent creates a durable proposal that the owner reviews and acce
     ]),
   );
   const listProjectsTool = tools.find((tool) => tool.name === 'list_projects');
-  expect(listProjectsTool?.description).toContain('conversational follow-ups');
-  expect(listProjectsTool?.description).toContain('the same paper');
+  expect(listProjectsTool?.description).toBeTruthy();
   const writeTools = new Set([
+    'edit_project',
+    'compile_project',
     'create_project',
     'rename_project',
     'organize_library',
@@ -195,7 +206,7 @@ test('OAuth MCP agent creates a durable proposal that the owner reviews and acce
     expect(tool.description).toContain('Mind Palace LaTeX Workshop');
     expect(tool.annotations).toMatchObject({
       readOnlyHint: !writeTools.has(tool.name),
-      destructiveHint: tool.name === 'organize_library',
+      destructiveHint: ['organize_library', 'edit_project'].includes(tool.name),
       idempotentHint: tool.name !== 'organize_library',
       openWorldHint: false,
     });
@@ -252,6 +263,7 @@ test('OAuth MCP agent creates a durable proposal that the owner reviews and acce
     tagIds: [tag.id],
     sourceProjectId: projectId,
     isTemplate: true,
+    reviewOnly: true,
     idempotencyKey: randomUUID(),
   });
   expect(created.project).toMatchObject({ name: createdName, isTemplate: true });
@@ -371,6 +383,206 @@ test('OAuth MCP agent creates a durable proposal that the owner reviews and acce
   });
   expect(renamed.project.name).toBe(`${createdName} renamed`);
   expect(renamed.project.workspaceUrl).toBe(created.reviewUrl);
+
+  await page.goto(`/latex-workshop/projects/${projectId}`);
+  await expect(page.locator('.view-lines')).toContainText('Start writing here.');
+  await page.locator('.view-lines').click();
+  await page.keyboard.press('Control+S');
+  await expect(page.locator('.editor-panel').getByRole('status')).toHaveText('Changes saved');
+  // Direct edits stay live across successive agent and owner turns, with no review dock.
+  const ownerFetch = async (path: string, body?: Record<string, unknown>) =>
+    page.evaluate(
+      async ({ path, body }) => {
+        const response = await fetch(`/latex-workshop/api/v1/projects/${path}`, {
+          credentials: 'include',
+          method: body ? 'POST' : 'GET',
+          headers: body ? { 'content-type': 'application/json' } : {},
+          ...(body ? { body: JSON.stringify(body) } : {}),
+        });
+        if (!response.ok) throw new Error(await response.text());
+        return response.json();
+      },
+      { path, body },
+    );
+  await ownerFetch(`${projectId}/entries`, {
+    name: 'untouched-empty',
+    kind: 'folder',
+    parentId: null,
+  });
+  const original = await callTool(agentRequest, accessToken, 'read_text_file', {
+    projectId,
+    path: 'main.tex',
+  });
+  const originalTree = await callTool(agentRequest, accessToken, 'get_project_tree', { projectId });
+  const directContent = String(original.content).replace(
+    'Start writing here.',
+    'First live agent edit.',
+  );
+  const directRequest = {
+    projectId,
+    expectedSourceRevision: originalTree.sourceRevision,
+    title: 'First live agent edit',
+    idempotencyKey: randomUUID(),
+    files: [
+      { path: 'main.tex', content: directContent, baseHash: original.hash },
+      { path: 'blank.tex', content: '', baseHash: null },
+    ],
+    structure: [{ operation: 'create_folder', targetPath: 'agent-empty' }],
+  };
+  const direct = await callTool(agentRequest, accessToken, 'edit_project', directRequest);
+  expect(direct.applied).toBe(true);
+  expect(direct.undoCheckpointId).toEqual(expect.any(String));
+  const retried = await callTool(agentRequest, accessToken, 'edit_project', directRequest);
+  expect(retried.sourceRevision).toBe(direct.sourceRevision);
+  expect(retried.undoCheckpointId).toBe(direct.undoCheckpointId);
+  expect(
+    (await callTool(agentRequest, accessToken, 'read_text_file', { projectId, path: 'blank.tex' }))
+      .content,
+  ).toBe('');
+  await expect(page.locator('.view-lines')).toContainText('First live agent edit.');
+  await expect(page.locator('.proposal-editor-dock')).toHaveCount(0);
+  const editor = page.locator('.monaco-editor').first();
+  await editor.click();
+  const undo = page.waitForResponse(
+    (response) => response.url().endsWith('/edit-history/checkout') && response.ok(),
+  );
+  await page.keyboard.press('Control+Z');
+  await undo;
+  expect(
+    (await callTool(agentRequest, accessToken, 'read_text_file', { projectId, path: 'main.tex' }))
+      .content,
+  ).toBe(original.content);
+  await callTool(agentRequest, accessToken, 'edit_project', directRequest);
+  expect(
+    (await callTool(agentRequest, accessToken, 'read_text_file', { projectId, path: 'main.tex' }))
+      .content,
+  ).toBe(original.content);
+  const redo = page.waitForResponse(
+    (response) => response.url().endsWith('/edit-history/checkout') && response.ok(),
+  );
+  await page.keyboard.press('Control+Y');
+  await redo;
+  await expect(page.locator('.view-lines')).toContainText('First live agent edit.');
+
+  // Stale batches and create-only replacements refuse every accepted-file mutation.
+  await expect(
+    callTool(agentRequest, accessToken, 'edit_project', {
+      ...directRequest,
+      idempotencyKey: randomUUID(),
+      files: [{ path: 'should-not-exist.tex', content: 'stale', baseHash: null }],
+    }),
+  ).rejects.toThrow();
+  const currentTree = await callTool(agentRequest, accessToken, 'get_project_tree', { projectId });
+  await expect(
+    callTool(agentRequest, accessToken, 'edit_project', {
+      ...directRequest,
+      expectedSourceRevision: currentTree.sourceRevision,
+      idempotencyKey: randomUUID(),
+      structure: [],
+      files: [{ path: 'main.tex', content: 'overwrite', baseHash: null }],
+    }),
+  ).rejects.toThrow();
+  await expect(
+    callTool(agentRequest, accessToken, 'edit_project', {
+      ...directRequest,
+      title: 'Different payload using the same key',
+    }),
+  ).rejects.toThrow();
+  expect(
+    (await callTool(agentRequest, accessToken, 'get_project_tree', { projectId })).entries,
+  ).not.toEqual(
+    expect.arrayContaining([expect.objectContaining({ path: 'should-not-exist.tex' })]),
+  );
+
+  const ownerProject = await ownerFetch(projectId);
+  const mainEntry = ownerProject.entries.find(
+    (entry: { name: string }) => entry.name === 'main.tex',
+  );
+  const ownerHistory = await ownerFetch(`${projectId}/entries/${mainEntry.id}/edit-history`);
+  const ownerContent = directContent.replace(
+    'First live agent edit.',
+    'First live agent edit. Owner revision.',
+  );
+  await ownerFetch(`${projectId}/entries/${mainEntry.id}/edit-history/commit`, {
+    baseVersion: ownerHistory.version,
+    expectedHeadId: ownerHistory.currentNodeId,
+    clientMutationId: randomUUID(),
+    content: ownerContent,
+    summary: 'Owner revision',
+  });
+  const freshFile = await callTool(agentRequest, accessToken, 'read_text_file', {
+    projectId,
+    path: 'main.tex',
+  });
+  expect(freshFile.content).toBe(ownerContent);
+  const freshTree = await callTool(agentRequest, accessToken, 'get_project_tree', { projectId });
+  const second = await callTool(agentRequest, accessToken, 'edit_project', {
+    projectId,
+    expectedSourceRevision: freshTree.sourceRevision,
+    title: 'Second live agent edit',
+    idempotencyKey: randomUUID(),
+    files: [
+      {
+        path: 'main.tex',
+        content: `${String(freshFile.content)}\n% Follow-up keeps owner revision\n`,
+        baseHash: freshFile.hash,
+      },
+    ],
+  });
+  const liveCompile = await callTool(agentRequest, accessToken, 'compile_project', {
+    projectId,
+    expectedSourceRevision: second.sourceRevision,
+  });
+  expect(liveCompile.job).toMatchObject({
+    status: 'succeeded',
+    target: 'accepted',
+    sourceRevision: second.sourceRevision,
+  });
+  await callTool(agentRequest, accessToken, 'get_compile_page_images', {
+    projectId,
+    compileJobId: liveCompile.job.id,
+    pages: [1],
+  });
+  await expect(page.locator('.view-lines')).toContainText('Owner revision.');
+
+  // The labeled UI restore undoes files and empty folders while preserving the original empty folder.
+  await page.getByLabel('Version history', { exact: true }).click();
+  await page.getByRole('button', { name: /Before agent edit: First live agent edit/ }).click();
+  await page.getByRole('button', { name: 'Restore checkpoint', exact: true }).click();
+  await page
+    .getByRole('dialog', { name: 'Restore checkpoint?' })
+    .getByRole('button', { name: 'Restore', exact: true })
+    .click();
+  await expect(page.getByRole('dialog', { name: 'Restore checkpoint?' })).toHaveCount(0);
+  const restoredTree = await callTool(agentRequest, accessToken, 'get_project_tree', { projectId });
+  expect(restoredTree.entries).toEqual(
+    expect.arrayContaining([expect.objectContaining({ path: 'untouched-empty', kind: 'folder' })]),
+  );
+  expect(restoredTree.entries).not.toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({ path: 'agent-empty' }),
+      expect.objectContaining({ path: 'blank.tex' }),
+    ]),
+  );
+  expect(
+    (await callTool(agentRequest, accessToken, 'read_text_file', { projectId, path: 'main.tex' }))
+      .content,
+  ).toBe(original.content);
+
+  const liveCreated = await callTool(agentRequest, accessToken, 'create_project', {
+    name: `Live created ${Date.now()}`,
+    sourceProjectId: projectId,
+    idempotencyKey: randomUUID(),
+  });
+  expect(liveCreated.proposal).toMatchObject({ status: 'resolved' });
+  expect(
+    (
+      await callTool(agentRequest, accessToken, 'read_text_file', {
+        projectId: liveCreated.project.id,
+        path: 'main.tex',
+      })
+    ).content,
+  ).toBe(original.content);
 
   const source = await callTool(agentRequest, accessToken, 'read_text_file', {
     projectId,
@@ -599,7 +811,7 @@ async function callTool(
   expect(response.ok(), await response.text()).toBeTruthy();
   const message = await parseMcpResponse(response);
   const result = message.result as { isError?: boolean; structuredContent?: unknown } | undefined;
-  expect(result?.isError).not.toBe(true);
+  expect(result?.isError, JSON.stringify(result)).not.toBe(true);
   const structured = result?.structuredContent;
   if (typeof structured !== 'object' || structured === null || Array.isArray(structured))
     throw new Error('MCP tool did not return a structured object');

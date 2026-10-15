@@ -1,4 +1,6 @@
 interface:
   display_name: 'LaTeX Workshop projects'
   short_description: 'Edit and compile Mind Palace LaTeX projects'
-  default_prompt: 'Edit my Mind Palace LaTeX Workshop project.'
+  default_prompt: 'Use $latex-workshop-projects to edit my Mind Palace LaTeX Workshop project.'
+policy:
+  allow_implicit_invocation: true

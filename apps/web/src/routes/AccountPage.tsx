@@ -418,7 +418,7 @@ function PendingAgentConsentCard({
       <p className="hint">
         {consent.scopes.includes('projects:read') ? 'Read selected projects' : 'Basic identity'}
         {consent.scopes.includes('proposals:write')
-          ? ' · Create reviewable proposals, never direct edits'
+          ? ' · Edit files directly with undo history; optionally create review proposals'
           : ''}
       </p>
       <p className="hint" id="pending-agent-projects">

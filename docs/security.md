@@ -22,6 +22,23 @@ Access to the container daemon is equivalent to host authority. Restrict it to d
 - Structured logging redacts cookies and authorization data. Audit records cover imports, restores, deletion, and quota-affecting operations.
 - Unauthorized and nonexistent tenant resources share the same `404` behavior to limit enumeration.
 
+## Dependency security pins
+
+The root `pnpm.overrides` pins DOMPurify to 3.4.16 and the existing fast-uri and
+brace-expansion major versions to their patched releases. These transitive pins cover
+[DOMPurify's detached-subtree advisory](https://github.com/advisories/GHSA-p98j-92pf-mc4p),
+[fast-uri's host-normalization advisory](https://github.com/advisories/GHSA-hrr3-gc8f-f4qj), and
+[brace-expansion's CPU-exhaustion advisory](https://github.com/advisories/GHSA-q2hr-2g5m-vwhr).
+Remove a pin when every parent dependency resolves to an equally safe version without it;
+keep `pnpm security:audit` as the release gate. Fastify is updated directly in the API and
+language-service packages, and Nodemailer in the API package. The resolved graph is recorded
+in `pnpm-lock.yaml`.
+
+The PostCSS source-map-js dependency is pinned to 1.2.2 to address
+[indexed source-map offset exhaustion](https://github.com/advisories/GHSA-68fv-2mgg-jv7q).
+TypeScript ESLint is updated to 8.71.2, removing the fast-glob/micromatch/braces dependency
+chain affected by [unbounded nested brace recursion](https://github.com/advisories/GHSA-vfj7-8cjw-p6xm).
+
 ## AI agent authorization boundary
 
 The MCP service is disabled unless `AGENT_MCP_ENABLED=true`. In production its resource URL must be
@@ -37,7 +54,12 @@ Normalized paths, case collisions, ancestry cycles, base hashes, proposal revisi
 idempotency keys are checked before mutation. Redis events contain IDs only; browsers always
 refetch durable, schema-validated state.
 
-An agent never updates accepted `entries` while drafting. Proposal objects use tenant-scoped keys,
+Optional review drafts never update accepted `entries`. Direct `edit_project` requests stage
+an internal change set, then atomically apply it against the exact expected project revision,
+recording a pre-edit checkpoint and file undo nodes in that same transaction. Internal change sets
+are separate from owner review proposals. Durable request hashes reject idempotency-key reuse with
+different payloads; applied requests stay applied on retry even if the owner subsequently undoes them.
+Direct edits require the existing OAuth write scope and a current owner/project grant. Proposal objects use tenant-scoped keys,
 and proposal compilation consumes an immutable checkpoint in the same networkless runner as an
 accepted build. Review applies only exact frozen hunks against the expected accepted projection;
 drift becomes an isolated conflict rather than a fuzzy merge. Connection, grant, proposal,
@@ -47,7 +69,7 @@ atomically discards the obsolete frozen hunks and decisions, clears the stale co
 and returns the proposal to `draft`. The revised state must be compiled and frozen again before the
 owner can accept it. Resolved and rejected proposals remain immutable.
 
-Compiled-page image requests identify an exact authorized proposal job and accept at most three
+Compiled-page image requests identify an exact authorized project or proposal job and accept at most three
 unique, bounded page numbers. The queue carries only the compile job database ID; an expiring Redis
 record holds the opaque render request parameters. Ghostscript runs on the worker in a separate
 non-root container with no network, a read-only root filesystem, no capabilities, bounded
@@ -55,3 +77,20 @@ CPU/memory/process/tmpfs resources, a hard timeout, and capped PDF/image sizes. 
 outputs are returned, under tenant- and job-scoped object keys.
 
 Rotate `AUTH_SECRET`, database, S3, SMTP, and Redis credentials with a managed secret store. Terminate TLS before all public traffic, set trusted proxy hops precisely, deny public S3 bucket access, and scan both Node and TeX images continuously. Run the cross-account endpoint suite on every authorization or schema change.
+
+## Optional private agent ingress
+
+Private MCP credentials are independent of user OAuth tokens. The tailnet nginx listener is
+published only on host loopback and must sit behind Tailscale Serve, which replaces spoofed identity
+headers with the authenticated peer's identity. The API also requires an unguessable ingress key
+and an exact owner login. The hosted OpenAI tunnel uses a different file-backed service credential
+inside the existing private workspace tunnel. Neither mode trusts a forwarded source IP, a browser
+cookie, an expired OAuth token, or an identity header by itself. Browser Origin headers are refused.
+Host administrators and processes that can read these server credentials remain inside the trust
+boundary; do not publish the loopback listener or distribute the tunnel to other users/workspaces.
+
+Both private identities resolve an existing verified account and explicit revocable connection
+policies. All project operations still resolve owner membership and grants, and retain write
+compare-and-swap, rate limits, quotas, and immutable compilation. Connection policies are provisioned
+only by explicit host setup and are never recreated during requests or deployment. Private tools
+advertise no user OAuth only after service authentication; ordinary discovery retains OAuth metadata.

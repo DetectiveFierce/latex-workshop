@@ -226,6 +226,7 @@ export const checkpointSchema = z.object({
   projectId: idSchema,
   sourceRevision: z.number().int(),
   reason: z.enum(['periodic', 'compile', 'import', 'restore', 'proposal']),
+  label: z.string().nullable().optional(),
   target: z.enum(['accepted', 'proposal']).default('accepted'),
   proposalId: idSchema.nullable().default(null),
   proposalRevision: z.number().int().nonnegative().nullable().default(null),

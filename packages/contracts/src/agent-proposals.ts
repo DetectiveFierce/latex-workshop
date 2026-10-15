@@ -26,13 +26,20 @@ const pdfPageNumbersSchema = z
     message: 'Page numbers must be unique',
   });
 
-export const agentPdfPageRequestSchema = z.object({
-  proposalId: idSchema.describe('Proposal id whose compiled PDF should be inspected'),
-  compileJobId: idSchema.describe('Exact succeeded compile job id returned by a compile tool'),
-  pages: pdfPageNumbersSchema.describe(
-    `One to ${agentPdfPageLimits.maxPagesPerRequest} one-based PDF page numbers`,
-  ),
-});
+export const agentPdfPageRequestSchema = z
+  .object({
+    proposalId: idSchema.optional().describe('Use for an optional review proposal PDF'),
+    projectId: idSchema
+      .optional()
+      .describe('Use for the live project PDF returned by compile_project'),
+    compileJobId: idSchema.describe('Exact succeeded compile job id returned by a compile tool'),
+    pages: pdfPageNumbersSchema.describe(
+      `One to ${agentPdfPageLimits.maxPagesPerRequest} one-based PDF page numbers`,
+    ),
+  })
+  .refine((input) => Boolean(input.proposalId) !== Boolean(input.projectId), {
+    message: 'Provide exactly one of projectId or proposalId',
+  });
 export type AgentPdfPageRequest = z.infer<typeof agentPdfPageRequestSchema>;
 
 export const agentPdfPageResponseSchema = z.object({
@@ -171,19 +178,21 @@ export const proposalMutationSchema = z.object({
     .number()
     .int()
     .nonnegative()
-    .describe('Revision from the immediately preceding proposal response'),
-  idempotencyKey: z
-    .uuid()
-    .describe('Fresh UUID for this distinct mutation; reuse only to retry the same operation'),
+    .describe('Latest returned proposal revision'),
+  idempotencyKey: z.uuid().describe('Fresh UUID; identical retries reuse it'),
 });
 
 export const startAgentProposalSchema = z.object({
-  projectId: idSchema.describe('Project id selected from list_projects'),
+  projectId: idSchema.describe('Project id from list_projects'),
   title: z.string().trim().min(1).max(200).describe('Short owner-facing summary of the change'),
   idempotencyKey: z.uuid().describe('Fresh UUID for starting this proposal'),
 });
 
 export const createAgentProjectSchema = z.object({
+  reviewOnly: z
+    .boolean()
+    .default(false)
+    .describe('Only true when the user explicitly asks to review seeded source before applying it'),
   name: z.string().trim().min(1).max(120).describe('Name for the new project'),
   folderId: idSchema
     .nullable()
@@ -210,7 +219,7 @@ export const createAgentProjectSchema = z.object({
 });
 
 const agentLibraryMutationBaseSchema = z.object({
-  idempotencyKey: z.uuid().describe('Fresh UUID for this mutation'),
+  idempotencyKey: z.uuid().describe('Fresh UUID; identical retries reuse it'),
 });
 
 export const agentLibraryMutationSchema = z.discriminatedUnion('action', [
@@ -270,7 +279,7 @@ export const agentLibraryMutationSchema = z.discriminatedUnion('action', [
 export type AgentLibraryMutation = z.infer<typeof agentLibraryMutationSchema>;
 
 export const renameAgentProjectSchema = z.object({
-  projectId: idSchema.describe('Project id selected from list_projects'),
+  projectId: idSchema.describe('Project id from list_projects'),
   name: z.string().trim().min(1).max(120).describe('New displayed project name'),
   idempotencyKey: z.uuid().describe('Fresh UUID for renaming this project'),
 });
@@ -311,6 +320,43 @@ const structureItemSchema = z.discriminatedUnion('operation', [
 export const proposeAgentStructureSchema = proposalMutationSchema.extend({
   changes: z.array(structureItemSchema).min(1).max(agentProposalLimits.maxChangedEntries),
 });
+
+// One atomic edit against the current site revision; null baseHash means create-only.
+export const editAgentProjectSchema = z
+  .object({
+    projectId: idSchema.describe('Project id from list_projects'),
+    expectedSourceRevision: z
+      .number()
+      .int()
+      .nonnegative()
+      .describe('sourceRevision from a fresh get_project_tree'),
+    title: z.string().trim().min(1).max(200).describe('Summary shown in undo history'),
+    idempotencyKey: z.uuid().describe('Fresh UUID; reuse only for an identical retry'),
+    files: z
+      .array(
+        putAgentProposalFileSchema.pick({ path: true, content: true }).extend({
+          baseHash: z
+            .string()
+            .regex(/^[a-f0-9]{64}$/)
+            .nullable()
+            .describe(
+              'Current read_text_file hash; null creates a new file and refuses replacement',
+            ),
+        }),
+      )
+      .max(agentProposalLimits.maxChangedEntries)
+      .default([]),
+    structure: z.array(structureItemSchema).max(agentProposalLimits.maxChangedEntries).default([]),
+  })
+  .refine(
+    (input) =>
+      input.files.length + input.structure.length > 0 &&
+      input.files.length + input.structure.length <= agentProposalLimits.maxChangedEntries,
+    {
+      message: 'Provide between 1 and 100 file or structure changes',
+    },
+  );
+export type EditAgentProject = z.infer<typeof editAgentProjectSchema>;
 
 export const proposalDecisionSchema = z.object({
   expectedProposalRevision: z.number().int().nonnegative(),
@@ -377,7 +423,7 @@ export const agentProposalEventSchema = z.discriminatedUnion('type', [
 export type AgentProposalEvent = z.infer<typeof agentProposalEventSchema>;
 
 export const readTextFileSchema = z.object({
-  projectId: idSchema.describe('Project id selected from list_projects'),
+  projectId: idSchema.describe('Project id from list_projects'),
   path: z.string().min(1).max(4_096).describe('Exact editable path from get_project_tree'),
   offset: z.number().int().nonnegative().default(0).describe('Byte offset; use prior nextOffset'),
   limit: z
