@@ -29,7 +29,7 @@ updates = {
     'AGENT_MCP_RESOURCE_URL': public_origin + '/api/mcp',
     'AGENT_MCP_ENABLED': 'true',
     'AGENT_MCP_DCR_ENABLED': 'true',
-    'AGENT_MCP_REFRESH_TOKEN_TTL_DAYS': '3650',
+    'AGENT_MCP_REFRESH_TOKEN_TTL_DAYS': values.get('AGENT_MCP_REFRESH_TOKEN_TTL_DAYS', '365'),
     'PUBLIC_MCP_GATEWAY_ENABLED': 'true',
 }
 backup = env_file.with_name('.env.before-public-mcp-' + datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S%fZ'))

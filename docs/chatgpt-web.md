@@ -32,7 +32,7 @@ pnpm deploy:production
 
 The preparation script backs up `.env`, preserves `WEB_ORIGIN`, selects the node's HTTPS port 10000 for `API_ORIGIN` and the canonical MCP resource, and enables the `public-mcp` deployment profile. Deployment activates only that dedicated Funnel listener; it does not reset existing Serve routes. The browser-facing login and consent pages continue using the private website.
 
-In ChatGPT, add a custom MCP server with **Server URL** set to the printed gateway URL and **OAuth** authentication. Connect once and select the authorized projects in Workshop's consent page. Request `offline_access` so ChatGPT can rotate access tokens automatically. Access tokens remain short-lived; this opt-in configuration retains refresh credentials for up to ten years, and the owner can revoke the connection immediately under Account settings → Agent access. Do not choose **No authentication** for the public gateway.
+In ChatGPT, add a custom MCP server with **Server URL** set to the printed gateway URL and **OAuth** authentication. Connect once and select the authorized projects in Workshop's consent page. Request `offline_access` so ChatGPT can rotate access tokens automatically. Access tokens remain short-lived. Rotation renews the existing refresh-token retention window (one year by default), so active connections continue automatically; the owner can revoke the connection immediately under Account settings → Agent access. Do not choose **No authentication** for the public gateway.
 
 Run the actual Nginx boundary tests before rollout:
 
