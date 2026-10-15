@@ -19,6 +19,27 @@ file-backed tunnel credential authenticates discovery and tool calls; set that p
 **No authentication** and refresh tools. Keep the existing tunnel/workspace association. Do not
 apply that mode to a shared or public app.
 
+### Direct authenticated gateway for Mind Palace
+
+When the OpenAI tunnel is unavailable, the self-hosted deployment can expose a dedicated OAuth-protected gateway using Tailscale Funnel on port 10000. The Workshop website, REST project API, account login, storage, and private MCP ingress remain Tailscale-only. The gateway forwards only MCP, OAuth discovery, client registration, authorization, token exchange, revocation, authenticated OpenID user information, and public signing keys. It strips private transport credentials and Tailscale identity headers, so public requests always need normal OAuth authorization to access projects.
+
+On the Mind Palace host, prepare the existing deployment and then deploy the repository:
+
+```bash
+infra/self-host/enable-public-mcp.sh
+pnpm deploy:production
+```
+
+The preparation script backs up `.env`, preserves `WEB_ORIGIN`, selects the node's HTTPS port 10000 for `API_ORIGIN` and the canonical MCP resource, and enables the `public-mcp` deployment profile. Deployment activates only that dedicated Funnel listener; it does not reset existing Serve routes. The browser-facing login and consent pages continue using the private website.
+
+In ChatGPT, add a custom MCP server with **Server URL** set to the printed gateway URL and **OAuth** authentication. Connect once and select the authorized projects in Workshop's consent page. Request `offline_access` so ChatGPT can rotate access tokens automatically. Access tokens remain short-lived; this opt-in configuration retains refresh credentials for up to ten years, and the owner can revoke the connection immediately under Account settings → Agent access. Do not choose **No authentication** for the public gateway.
+
+Run the actual Nginx boundary tests before rollout:
+
+```bash
+node --test infra/openai-mcp-tunnel/public-gateway.test.mjs
+```
+
 ### Public ingress configuration
 
 Deploy with agent access enabled and the canonical public endpoint:

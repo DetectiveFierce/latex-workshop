@@ -55,4 +55,12 @@ docker compose ps
 docker compose logs --tail=100 tunnel-client
 ```
 
-The container is ready only when its Docker health is `healthy`. It has no published ports. Its local operator page is available only on the server at `http://127.0.0.1:18080/ui` while the service is running.
+The Docker health probe requires both local readiness and a successful OpenAI control-plane poll within the last 90 seconds. `/readyz` alone only proves local startup readiness: it can return `ready` while OpenAI metadata and polling fail with 503/504 responses. A past successful poll also stops proving connectivity when polling fails again. Check the last successful poll and recent errors in the local operator page at `http://127.0.0.1:18080/ui` when investigating a later outage. The service has no published ports.
+
+The client release and artifact SHA-256 are pinned in `Dockerfile`. Production deployment builds the tunnel image alongside the application images and installs its Compose configuration; updating the repository therefore updates the running tunnel rather than leaving an older standalone container in place. Existing tunnel identity, runtime credential, and workspace associations are preserved.
+
+After building the image, run the live probe regression checks (Docker with host networking is required):
+
+```bash
+node --test infra/openai-mcp-tunnel/health.test.mjs
+```

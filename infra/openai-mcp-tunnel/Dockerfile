@@ -1,7 +1,7 @@
 FROM debian:bookworm-slim@sha256:88200866dfff7ea7f5cbcb6ec7c8a701889efe6fe859fe64d6990e4b07ea4171 AS fetch
 
-ARG TUNNEL_CLIENT_VERSION=0.0.14
-ARG TUNNEL_CLIENT_SHA256=15bd17e805cad39d412199115bb9e10a978dd35258a114cdf25dd2ae6681c7d3
+ARG TUNNEL_CLIENT_VERSION=0.0.16
+ARG TUNNEL_CLIENT_SHA256=d60cdba019bce451bcc3a15478cc5b9cb11270b049f5b56ea39a80b517f8b117
 
 RUN apt-get update \
   && apt-get install --yes --no-install-recommends ca-certificates curl python3 \
@@ -26,6 +26,8 @@ RUN apt-get update \
 
 COPY --from=fetch --chown=65532:65532 /tmp/tunnel-client/tunnel-client /usr/local/bin/tunnel-client
 COPY --from=fetch --chown=65532:65532 /tmp/tunnel-client/cloudflared /usr/local/bin/cloudflared
+COPY health.sh /usr/local/bin/workshop-tunnel-health
+RUN chmod 0555 /usr/local/bin/workshop-tunnel-health
 
 USER 65532:65532
 ENTRYPOINT ["tunnel-client"]

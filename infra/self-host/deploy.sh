@@ -297,6 +297,12 @@ if [[ $deployment_mode == production ]]; then
   start_image_build texlive docker build --file "$release_dir/infra/texlive/Dockerfile" \
     --tag "$texlive_image" "$release_dir"
 fi
+if grep -Eq '^AGENT_MCP_TUNNEL_KEY=[a-f0-9]{64}$' "$env_file" &&
+  ! grep -qx 'PUBLIC_MCP_GATEWAY_ENABLED=true' "$env_file"; then
+  start_image_build openai-tunnel env TUNNEL_IMAGE_TAG="$release_id" docker compose \
+    --env-file /home/mind-palace/services/openai-mcp-tunnel/.env \
+    -f "$release_dir/infra/openai-mcp-tunnel/compose.yml" build tunnel-client
+fi
 
 build_failed=false
 for index in "${!build_pids[@]}"; do
@@ -349,12 +355,15 @@ application_services=(api language-service compile-worker web)
 if grep -Eq '^AGENT_MCP_TAILNET_KEY=[a-f0-9]{64}$' "$env_file"; then
   application_services+=(tailnet-mcp)
 fi
+if grep -qx 'PUBLIC_MCP_GATEWAY_ENABLED=true' "$env_file"; then
+  application_services+=(public-mcp)
+fi
 "${compose[@]}" up -d --wait --wait-timeout 180 "${application_services[@]}" </dev/null
 
 for service in "${application_services[@]}"; do
   container_id=$("${compose[@]}" ps -q "$service" </dev/null)
   image=$(docker inspect --format '{{.Config.Image}}' "$container_id")
-  if [[ $service == web || $service == tailnet-mcp ]]; then
+  if [[ $service == web || $service == tailnet-mcp || $service == public-mcp ]]; then
     expected_image="latex-workshop-web:$release_id"
   else
     expected_image="latex-workshop-services:$release_id"
@@ -377,12 +386,33 @@ if [[ " ${application_services[*]} " == *' tailnet-mcp '* ]]; then
   tailnet_name=$(tailscale status --json | python3 -c 'import json,sys; print(json.load(sys.stdin)["Self"]["DNSName"].rstrip("."))')
   curl --fail --silent --show-error --retry 3 "https://$tailnet_name:9443/health/live" >/dev/null
 fi
-if grep -Eq '^AGENT_MCP_TUNNEL_KEY=[a-f0-9]{64}$' "$env_file"; then
+if grep -qx 'PUBLIC_MCP_GATEWAY_ENABLED=true' "$env_file"; then
+  curl --fail --silent --show-error http://127.0.0.1:8090/health/live >/dev/null
+  tailscale funnel --https=10000 --bg http://127.0.0.1:8090 </dev/null
+  public_name=$(tailscale status --json | python3 -c 'import json,sys; print(json.load(sys.stdin)["Self"]["DNSName"].rstrip("."))')
+  curl --fail --silent --show-error --retry 3 "https://$public_name:10000/health/live" >/dev/null
+  # Keep the old transport recoverable while the new connection is verified in ChatGPT.
+elif grep -Eq '^AGENT_MCP_TUNNEL_KEY=[a-f0-9]{64}$' "$env_file"; then
   tunnel_root=/home/mind-palace/services/openai-mcp-tunnel
   test -s "$deploy_root/runtime/tunnel-mcp-key"
+  install -m 644 "$release_dir/infra/openai-mcp-tunnel/Dockerfile" "$tunnel_root/Dockerfile"
+  install -m 644 "$release_dir/infra/openai-mcp-tunnel/health.sh" "$tunnel_root/health.sh"
+  install -m 644 "$release_dir/infra/openai-mcp-tunnel/compose.yml" "$tunnel_root/compose.yml"
   install -m 644 "$release_dir/infra/openai-mcp-tunnel/compose.private.yml" "$tunnel_root/compose.private.yml"
+  tunnel_env_next=$(mktemp "$tunnel_root/.env.XXXXXX")
+  sed '/^TUNNEL_IMAGE_TAG=/d' "$tunnel_root/.env" >"$tunnel_env_next"
+  printf 'TUNNEL_IMAGE_TAG=%s\n' "$release_id" >>"$tunnel_env_next"
+  chmod 600 "$tunnel_env_next"
+  mv "$tunnel_env_next" "$tunnel_root/.env"
   docker compose -f "$tunnel_root/compose.yml" -f "$tunnel_root/compose.private.yml" \
     --env-file "$tunnel_root/.env" up -d --wait --wait-timeout 120 </dev/null
+  # Some Compose versions return from --wait before this standalone service is
+  # healthy. Verify actual connectivity before release cleanup or success.
+  if ! docker compose -f "$tunnel_root/compose.yml" -f "$tunnel_root/compose.private.yml" \
+    --env-file "$tunnel_root/.env" exec -T tunnel-client workshop-tunnel-health; then
+    echo 'Workshop is active, but hosted MCP connectivity failed verification; previous releases are retained.' >&2
+    exit 1
+  fi
 fi
 
 trap - ERR
@@ -397,6 +427,7 @@ while IFS= read -r old_release; do
   [[ $old_release == "$current_release" || $old_release == "$previous_release" ]] && continue
   old_id=${old_release##*/}
   docker image rm "latex-workshop-web:$old_id" "latex-workshop-services:$old_id" \
+    "latex-workshop-openai-tunnel:$old_id" \
     2>/dev/null || true
   if [[ $active_texlive_image != "latex-workshop-texlive:$old_id" ]]; then
     docker image rm "latex-workshop-texlive:$old_id" 2>/dev/null || true

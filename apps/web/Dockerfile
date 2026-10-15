@@ -14,5 +14,6 @@ RUN pnpm exec turbo run build --filter=@latex-workshop/web
 FROM nginx:1.29-alpine@sha256:5616878291a2eed594aee8db4dade5878cf7edcb475e59193904b198d9b830de
 COPY apps/web/nginx.conf /etc/nginx/conf.d/default.conf
 COPY apps/web/tailnet-mcp.conf.template /etc/nginx/tailnet-mcp.conf.template
+COPY apps/web/public-mcp.conf /etc/nginx/public-mcp.conf
 COPY --from=build /app/apps/web/dist /usr/share/nginx/html
 EXPOSE 80

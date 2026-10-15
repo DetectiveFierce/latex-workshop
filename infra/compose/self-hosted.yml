@@ -333,6 +333,26 @@ services:
       retries: 12
     logging: *default-logging
 
+  public-mcp:
+    profiles: [public-mcp]
+    image: ${WEB_IMAGE:?set WEB_IMAGE}
+    restart: unless-stopped
+    entrypoint: [nginx]
+    command: [-c, /etc/nginx/public-mcp.conf, -g, 'daemon off;']
+    read_only: true
+    tmpfs: [/tmp, /var/cache/nginx, /var/run]
+    ports: ['127.0.0.1:8090:8090']
+    networks: [backend, tailnet-ingress]
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: [CMD, wget, -qO-, http://127.0.0.1:8090/health/live]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+    logging: *default-logging
+
   minio-backup:
     image: minio/mc@sha256:eb4ea9884b77704230e2423e9004d2fa738dc272876b9cc41a297d29443b8780
     profiles: [tools]

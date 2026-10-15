@@ -5,7 +5,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: latex-workshop-openai-tunnel:0.0.14
+    image: latex-workshop-openai-tunnel:${TUNNEL_IMAGE_TAG:-0.0.16}
     command:
       - run
       - --control-plane.tunnel-id=${OPENAI_TUNNEL_ID:?set OPENAI_TUNNEL_ID}
@@ -36,7 +36,7 @@ services:
     volumes:
       - ${CADDY_ROOT_CA_PATH:?set CADDY_ROOT_CA_PATH}:/run/certs/caddy-root.crt:ro
     healthcheck:
-      test: [CMD, curl, -fsS, http://127.0.0.1:18080/readyz]
+      test: [CMD, workshop-tunnel-health, 'http://127.0.0.1:18080']
       interval: 15s
       timeout: 5s
       retries: 8
