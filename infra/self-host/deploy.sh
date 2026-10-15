@@ -391,6 +391,46 @@ if grep -qx 'PUBLIC_MCP_GATEWAY_ENABLED=true' "$env_file"; then
   tailscale funnel --https=10000 --bg http://127.0.0.1:8090 </dev/null
   public_name=$(tailscale status --json | python3 -c 'import json,sys; print(json.load(sys.stdin)["Self"]["DNSName"].rstrip("."))')
   curl --fail --silent --show-error --retry 3 "https://$public_name:10000/health/live" >/dev/null
+  resource_url=$(sed -n 's/^AGENT_MCP_RESOURCE_URL=//p' "$env_file" | tail -1)
+  python3 - "$resource_url" <<'VERIFY_PUBLIC_MCP'
+import json
+import sys
+from urllib.error import HTTPError
+from urllib.parse import urlsplit
+from urllib.request import Request, urlopen
+
+resource = sys.argv[1]
+parts = urlsplit(resource)
+origin = parts.scheme + '://' + parts.netloc
+
+def request(path, data=None):
+    headers = {'Accept': 'application/json, text/event-stream'}
+    if data is not None:
+        headers['Content-Type'] = 'application/json'
+    try:
+        with urlopen(Request(origin + path, data=data, headers=headers), timeout=20) as response:
+            return response.status, response.read(1024 * 1024)
+    except HTTPError as error:
+        return error.code, b''
+
+status, body = request('/.well-known/oauth-protected-resource' + parts.path)
+if status != 200 or json.loads(body).get('resource') != resource:
+    raise SystemExit('Public MCP resource discovery failed verification')
+metadata = json.loads(body)
+issuer = urlsplit(metadata['authorization_servers'][0])
+status, body = request('/.well-known/oauth-authorization-server' + issuer.path)
+if status != 200 or json.loads(body).get('issuer') != metadata['authorization_servers'][0]:
+    raise SystemExit('Public OAuth authorization discovery failed verification')
+base_path = parts.path.removesuffix('/api/mcp')
+for path in (base_path + '/', base_path + '/api/v1/projects', parts.path + '/private'):
+    if request(path)[0] != 404:
+        raise SystemExit('Public MCP gateway exposed a private route')
+body = json.dumps({'jsonrpc': '2.0', 'id': 1, 'method': 'tools/call',
+                   'params': {'name': 'list_projects', 'arguments': {}}}).encode()
+if request(parts.path, body)[0] != 401:
+    raise SystemExit('Public MCP gateway did not require OAuth for project access')
+print('Public MCP discovery, OAuth discovery, private-route isolation, and authentication verified.')
+VERIFY_PUBLIC_MCP
   # Keep the old transport recoverable while the new connection is verified in ChatGPT.
 elif grep -Eq '^AGENT_MCP_TUNNEL_KEY=[a-f0-9]{64}$' "$env_file"; then
   tunnel_root=/home/mind-palace/services/openai-mcp-tunnel
