@@ -23,12 +23,14 @@ apply that mode to a shared or public app.
 
 When the OpenAI tunnel is unavailable, the self-hosted deployment can expose a dedicated OAuth-protected gateway using Tailscale Funnel on port 10000. The Workshop website, REST project API, account login, storage, and private MCP ingress remain Tailscale-only. The gateway forwards only MCP, OAuth discovery, client registration, authorization, token exchange, revocation, authenticated OpenID user information, and public signing keys. It strips private transport credentials and Tailscale identity headers, so public requests always need normal OAuth authorization to access projects.
 
-On the Mind Palace host, prepare the existing deployment and then deploy the repository:
+From the repository checkout, prepare the existing Mind Palace deployment over SSH, then deploy:
 
 ```bash
-infra/self-host/enable-public-mcp.sh
+ssh mind-palace bash -s < infra/self-host/enable-public-mcp.sh
 pnpm deploy:production
 ```
+
+Enable Funnel in the tailnet policy for the Mind Palace node only: add a `nodeAttrs` entry targeting its Tailscale IP with `attr: ["funnel"]`. The default Funnel onboarding button instead grants that capability to every member. The operator must approve the scoped network-policy change before activation.
 
 The preparation script backs up `.env`, preserves `WEB_ORIGIN`, selects the node's HTTPS port 10000 for `API_ORIGIN` and the canonical MCP resource, and enables the `public-mcp` deployment profile. Deployment activates only that dedicated Funnel listener; it does not reset existing Serve routes. The browser-facing login and consent pages continue using the private website.
 
