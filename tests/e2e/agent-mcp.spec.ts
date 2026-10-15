@@ -6,6 +6,7 @@ import {
   test,
   type APIRequestContext,
   type APIResponse,
+  type Page,
 } from '@playwright/test';
 
 const apiOrigin = process.env.E2E_API_URL ?? 'http://localhost:3001';
@@ -385,7 +386,7 @@ test('OAuth MCP agent creates a durable proposal that the owner reviews and acce
   expect(renamed.project.workspaceUrl).toBe(created.reviewUrl);
 
   await page.goto(`/latex-workshop/projects/${projectId}`);
-  await expect(page.locator('.view-lines')).toContainText('Start writing here.');
+  await expect.poll(() => visibleEditorText(page)).toContain('Start writing here.');
   await page.locator('.view-lines').click();
   await page.keyboard.press('Control+S');
   await expect(page.locator('.editor-panel').getByRole('status')).toHaveText('Changes saved');
@@ -439,7 +440,7 @@ test('OAuth MCP agent creates a durable proposal that the owner reviews and acce
     (await callTool(agentRequest, accessToken, 'read_text_file', { projectId, path: 'blank.tex' }))
       .content,
   ).toBe('');
-  await expect(page.locator('.view-lines')).toContainText('First live agent edit.');
+  await expect.poll(() => visibleEditorText(page)).toContain('First live agent edit.');
   await expect(page.locator('.proposal-editor-dock')).toHaveCount(0);
   const editor = page.locator('.monaco-editor').first();
   await editor.click();
@@ -462,7 +463,7 @@ test('OAuth MCP agent creates a durable proposal that the owner reviews and acce
   );
   await page.keyboard.press('Control+Y');
   await redo;
-  await expect(page.locator('.view-lines')).toContainText('First live agent edit.');
+  await expect.poll(() => visibleEditorText(page)).toContain('First live agent edit.');
 
   // Stale batches and create-only replacements refuse every accepted-file mutation.
   await expect(
@@ -543,7 +544,7 @@ test('OAuth MCP agent creates a durable proposal that the owner reviews and acce
     compileJobId: liveCompile.job.id,
     pages: [1],
   });
-  await expect(page.locator('.view-lines')).toContainText('Owner revision.');
+  await expect.poll(() => visibleEditorText(page)).toContain('Owner revision.');
 
   // The labeled UI restore undoes files and empty folders while preserving the original empty folder.
   await page.getByLabel('Version history', { exact: true }).click();
@@ -645,14 +646,14 @@ test('OAuth MCP agent creates a durable proposal that the owner reviews and acce
     .getByText('A reviewable change from the agent harness.', { exact: false })
     .click();
   await page.keyboard.type(' typed');
-  await expect(page.locator('.view-lines')).toContainText('typed');
+  await expect.poll(() => visibleEditorText(page)).toContain('typed');
   await expect(page.getByLabel('Reject all proposed changes')).toBeEnabled();
 
   const deletion = page.locator('.proposal-deletion-zone').first();
   await deletion.click();
-  const beforeDeletion = await page.locator('.view-lines').innerText();
+  const beforeDeletion = await visibleEditorText(page);
   await page.keyboard.type('should-not-edit');
-  await expect.poll(async () => page.locator('.view-lines').innerText()).toBe(beforeDeletion);
+  await expect.poll(() => visibleEditorText(page)).toBe(beforeDeletion);
 
   // Monaco's syntax theme is audited separately; exclude its aria-hidden rendering
   // internals while checking the surrounding proposal controls and dock.
@@ -705,7 +706,7 @@ test('OAuth MCP agent creates a durable proposal that the owner reviews and acce
   await ordinarySourceLine.click();
   await page.keyboard.press('End');
   await page.keyboard.type(' % owner review edit');
-  await expect(page.locator('.view-lines')).toContainText('owner review edit');
+  await expect.poll(() => visibleEditorText(page)).toContain('owner review edit');
   await expect.poll(activeProposalRevision).not.toBe(beforeOwnerEdit);
   await expect(page.locator('.pdf-empty')).toBeVisible();
   const manuallyEditedRevision = await activeProposalRevision();
@@ -737,10 +738,10 @@ test('OAuth MCP agent creates a durable proposal that the owner reviews and acce
     .locator('.proposal-editor-dock')
     .getByRole('button', { name: /notes\.tex/ })
     .click();
-  await expect(page.locator('.view-lines')).toContainText('Notes from the agent.');
+  await expect.poll(() => visibleEditorText(page)).toContain('Notes from the agent.');
   await page.getByLabel('Accept all proposed changes').click();
   await expect(review).toHaveCount(0);
-  await expect(page.locator('.view-lines')).toContainText('Notes from the agent.');
+  await expect.poll(() => visibleEditorText(page)).toContain('Notes from the agent.');
 
   const revokeStatus = await page.evaluate(async (clientId) => {
     const response = await fetch(
@@ -928,4 +929,17 @@ async function waitForVerificationUrl(request: APIRequestContext, email: string)
     await new Promise((resolve) => setTimeout(resolve, 250));
   }
   throw new Error(`Verification email for ${email} did not arrive`);
+}
+
+// Monaco recycles wrapped rows without keeping their DOM order. Read visual
+// positions so source assertions remain meaningful at tablet widths.
+function visibleEditorText(page: Page) {
+  return page.locator('.view-lines .view-line').evaluateAll((lines) =>
+    lines
+      .map((line) => ({ top: line.getBoundingClientRect().top, text: line.textContent ?? '' }))
+      .sort((left, right) => left.top - right.top)
+      .map((line) => line.text)
+      .join(' ')
+      .replace(/\s+/g, ' '),
+  );
 }

@@ -392,7 +392,18 @@ test('library organizes projects with folders, tags, views, bulk actions, and re
   await page.getByRole('button', { name: 'Sign in' }).click();
   await expect(page.getByRole('heading', { name: 'Library' })).toBeVisible();
 
-  await page.getByRole('button', { name: 'Templates' }).click();
+  const openLibraryNavigation = async () => {
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+    const opener = page.getByRole('button', { name: 'Open library navigation' });
+    if ((await opener.isVisible()) && (await page.locator('.library-sidebar.open').count()) === 0)
+      await opener.click();
+  };
+  const selectLibrarySection = async (name: string) => {
+    await openLibraryNavigation();
+    await page.locator('.library-sidebar').getByRole('button', { name, exact: true }).click();
+  };
+
+  await selectLibrarySection('Templates');
   await expect(page.getByRole('heading', { name: 'Templates' })).toBeVisible();
   await expect(page.getByText('Aidan Template', { exact: true })).toBeVisible();
   await expect
@@ -465,12 +476,12 @@ test('library organizes projects with folders, tags, views, bulk actions, and re
   await page.getByRole('button', { name: 'From Aidan actions' }).click();
   await page.getByRole('menuitem', { name: 'Make template' }).click();
   await expect(page.getByText('From Aidan', { exact: true })).toHaveCount(0);
-  await page.getByRole('button', { name: 'Templates' }).click();
+  await selectLibrarySection('Templates');
   await expect(page.getByText('From Aidan', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'From Aidan actions' }).click();
   await page.getByRole('menuitem', { name: 'Remove from templates' }).click();
   await expect(page.getByText('From Aidan', { exact: true })).toHaveCount(0);
-  await page.getByRole('button', { name: 'Library', exact: true }).click();
+  await selectLibrarySection('Library');
   await expect(page.getByText('From Aidan', { exact: true })).toBeVisible();
 
   await page.getByRole('button', { name: 'New', exact: true }).click();
@@ -502,10 +513,16 @@ test('library organizes projects with folders, tags, views, bulk actions, and re
   await page.reload();
   await expect(page.getByText('Folder Paper')).toBeVisible();
 
+  await openLibraryNavigation();
   await page.getByRole('button', { name: 'New tag' }).click();
   await page.getByLabel('Tag name').fill('Draft');
   await page.getByRole('button', { name: 'amber' }).click();
   await page.getByRole('button', { name: 'Create tag' }).click();
+  if ((await page.locator('.library-sidebar.open').count()) > 0)
+    await page
+      .locator('.library-sidebar')
+      .getByRole('button', { name: 'Close navigation' })
+      .click();
   await page.getByRole('button', { name: 'Folder Paper actions' }).click();
   await page.getByRole('menuitem', { name: 'Manage tags' }).click();
   const draftTag = page.getByRole('checkbox', { name: /Draft/ });
@@ -519,7 +536,11 @@ test('library organizes projects with folders, tags, views, bulk actions, and re
   await expect(page.locator('.library-project-card').getByText('Draft')).toBeVisible();
 
   await page.getByRole('button', { name: 'List view' }).click();
-  await expect(page.getByText('Location', { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'List view' })).toHaveAttribute(
+    'aria-pressed',
+    'true',
+  );
+  await expect(page.locator('.project-list')).toBeVisible();
   await page.getByRole('checkbox', { name: 'Select Folder Paper' }).check();
   await page
     .getByRole('toolbar', { name: 'Selected project actions' })
@@ -548,7 +569,7 @@ test('library organizes projects with folders, tags, views, bulk actions, and re
     .getByRole('button', { name: 'Favorite' })
     .click();
   expect((await favoriteResponse).ok()).toBeTruthy();
-  await page.getByRole('button', { name: 'Favorites', exact: true }).click();
+  await selectLibrarySection('Favorites');
   await expect(page.getByText('Folder Paper')).toBeVisible();
 
   await page.getByRole('checkbox', { name: 'Select Folder Paper' }).check();
@@ -557,17 +578,17 @@ test('library organizes projects with folders, tags, views, bulk actions, and re
     .getByRole('button', { name: 'Trash' })
     .click();
   await page.getByRole('button', { name: 'Move to trash' }).click();
-  await page.getByRole('button', { name: 'Trash', exact: true }).click();
+  await selectLibrarySection('Trash');
   await expect(page.getByText('Folder Paper')).toBeVisible();
   await page.getByRole('button', { name: 'Folder Paper actions' }).click();
   await page.getByRole('menuitem', { name: 'Restore' }).click();
   await expect(page.getByText('Folder Paper')).toHaveCount(0);
 
-  await page.getByRole('button', { name: 'Library', exact: true }).click();
+  await selectLibrarySection('Library');
   await page.getByRole('button', { name: 'Research folder actions' }).last().click();
   await page.getByRole('menuitem', { name: 'Move to trash' }).click();
   await page.getByRole('button', { name: 'Move to trash' }).click();
-  await page.getByRole('button', { name: 'Trash', exact: true }).click();
+  await selectLibrarySection('Trash');
   await expect(page.locator('.folder-tile').getByText('Research')).toBeVisible();
   await page.getByRole('button', { name: 'Research folder actions' }).click();
   await page.getByRole('menuitem', { name: 'Restore folder' }).click();
