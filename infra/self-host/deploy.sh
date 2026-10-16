@@ -357,13 +357,18 @@ if grep -Eq '^AGENT_MCP_TAILNET_KEY=[a-f0-9]{64}$' "$env_file"; then
 fi
 if grep -qx 'PUBLIC_MCP_GATEWAY_ENABLED=true' "$env_file"; then
   application_services+=(public-mcp)
+  if grep -qx 'PUBLIC_MCP_DEDICATED_TAILSCALE=true' "$env_file"; then
+    application_services+=(public-mcp-tailscale)
+  fi
 fi
 "${compose[@]}" up -d --wait --wait-timeout 180 "${application_services[@]}" </dev/null
 
 for service in "${application_services[@]}"; do
   container_id=$("${compose[@]}" ps -q "$service" </dev/null)
   image=$(docker inspect --format '{{.Config.Image}}' "$container_id")
-  if [[ $service == web || $service == tailnet-mcp || $service == public-mcp ]]; then
+  if [[ $service == public-mcp-tailscale ]]; then
+    expected_image='tailscale/tailscale:v1.102.3@sha256:8c42c4574ab066384fcb72f69e086a2ff1dd3652eb6f56856cee34bcf0d2f680'
+  elif [[ $service == web || $service == tailnet-mcp || $service == public-mcp ]]; then
     expected_image="latex-workshop-web:$release_id"
   else
     expected_image="latex-workshop-services:$release_id"
@@ -388,9 +393,12 @@ if [[ " ${application_services[*]} " == *' tailnet-mcp '* ]]; then
 fi
 if grep -qx 'PUBLIC_MCP_GATEWAY_ENABLED=true' "$env_file"; then
   curl --fail --silent --show-error http://127.0.0.1:8090/health/live >/dev/null
-  tailscale funnel --https=10000 --bg http://127.0.0.1:8090 </dev/null
-  public_name=$(tailscale status --json | python3 -c 'import json,sys; print(json.load(sys.stdin)["Self"]["DNSName"].rstrip("."))')
-  curl --fail --silent --show-error --retry 3 "https://$public_name:10000/health/live" >/dev/null
+  if grep -qx 'PUBLIC_MCP_DEDICATED_TAILSCALE=true' "$env_file"; then
+    "${compose[@]}" exec -T public-mcp-tailscale tailscale --socket=/tmp/tailscaled.sock \
+      funnel --https=443 --bg http://latex-workshop-public-mcp-1:8090 </dev/null
+  else
+    tailscale funnel --https=10000 --bg http://127.0.0.1:8090 </dev/null
+  fi
   resource_url=$(sed -n 's/^AGENT_MCP_RESOURCE_URL=//p' "$env_file" | tail -1)
   python3 - "$resource_url" <<'VERIFY_PUBLIC_MCP'
 import json

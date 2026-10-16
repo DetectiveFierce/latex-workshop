@@ -16,14 +16,21 @@ root = Path(sys.argv[1])
 env_file = root / '.env'
 lines = env_file.read_text().splitlines()
 values = dict(line.split('=', 1) for line in lines if '=' in line and not line.startswith('#'))
-status = json.loads(subprocess.check_output(['tailscale', 'status', '--json']))
+dedicated = values.get('PUBLIC_MCP_DEDICATED_TAILSCALE') == 'true'
+status_command = ['tailscale', 'status', '--json']
+if dedicated:
+    status_command = ['docker', 'compose', '--env-file', str(env_file), '-f',
+                      str(root / 'current/infra/compose/self-hosted.yml'), 'exec', '-T',
+                      'public-mcp-tailscale', 'tailscale', '--socket=/tmp/tailscaled.sock',
+                      'status', '--json']
+status = json.loads(subprocess.check_output(status_command))
 hostname = status['Self']['DNSName'].rstrip('.')
 if not re.fullmatch(r'[a-zA-Z0-9.-]+\.ts\.net', hostname):
     raise SystemExit('Tailscale did not return a valid HTTPS hostname')
 current = urlsplit(values.get('API_ORIGIN', ''))
 if current.scheme != 'https' or current.hostname != hostname or current.username or current.password:
     raise SystemExit('API_ORIGIN must already use this node’s Tailscale HTTPS hostname')
-public_origin = urlunsplit(('https', hostname + ':10000', current.path.rstrip('/'), '', ''))
+public_origin = urlunsplit(('https', hostname + ('' if dedicated else ':10000'), current.path.rstrip('/'), '', ''))
 updates = {
     'API_ORIGIN': public_origin,
     'AGENT_MCP_RESOURCE_URL': public_origin + '/api/mcp',

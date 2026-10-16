@@ -1,0 +1,22 @@
+{
+  "mcpServers": {
+    "latex-workshop": {
+      "type": "streamable-http",
+      "url": "https://workshop-mcp.tail7e24aa.ts.net/latex-workshop/api/mcp",
+      "headers": {},
+      "extensions": {
+        "com.openai": {
+          "auth": {
+            "type": "oauth",
+            "client": {
+              "mode": "cimd"
+            },
+            "baseScopes": ["openid", "profile", "offline_access"],
+            "defaultScopes": ["projects:read", "proposals:write"],
+            "oidcEnabled": false
+          }
+        }
+      }
+    }
+  }
+}

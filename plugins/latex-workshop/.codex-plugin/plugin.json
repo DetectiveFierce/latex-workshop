@@ -1,24 +1,22 @@
 {
-  "name": "latex-workshop",
-  "version": "1.1.0+codex.20261002000000",
-  "description": "Read, edit, and compile Mind Palace LaTeX projects on Workshop mentions or LaTeX file requests.",
-  "author": {
-    "name": "Mind Palace"
-  },
-  "skills": "./skills/",
   "interface": {
     "displayName": "LaTeX Workshop",
-    "shortDescription": "Organize, edit, and compile private LaTeX projects.",
-    "longDescription": "Organize folders and tags, place projects intelligently, and edit site-hosted LaTeX Workshop projects from ChatGPT or Codex through project-scoped access, immediate atomic edits with undo, live compilation, and optional review proposals. Select automatically on Workshop mentions or LaTeX file editing/querying requests, including follow-ups. Generic proof checking alone does not activate it.",
-    "developerName": "Mind Palace",
+    "shortDescription": "Private LaTeX projects",
+    "longDescription": "Organize site-hosted LaTeX projects, apply atomic live edits with undo, compile PDFs, and request review when needed.",
+    "developerName": "Aidan J. Wagner",
     "category": "Productivity",
-    "capabilities": ["Read", "Write", "Organize"],
-    "defaultPrompt": [
-      "Edit my LaTeX Workshop project.",
-      "Fix and compile my Mind Palace paper.",
-      "Create a LaTeX Workshop project from a template.",
-      "Organize my LaTeX Workshop projects into folders and tags."
-    ]
+    "capabilities": ["Interactive"],
+    "defaultPrompt": "Help me with a LaTeX Workshop project.",
+    "composerIcon": "./assets/mind-palace-icon.svg",
+    "logo": "./assets/mind-palace-icon.svg"
   },
-  "apps": "./.app.json"
+  "name": "latex-workshop",
+  "version": "1.1.2",
+  "description": "Find, organize, edit, compile, and review private Mind Palace LaTeX Workshop projects.",
+  "author": {
+    "name": "Aidan J. Wagner"
+  },
+  "keywords": [],
+  "skills": "./skills",
+  "mcpServers": "./.mcp.json"
 }

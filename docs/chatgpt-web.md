@@ -21,7 +21,7 @@ apply that mode to a shared or public app.
 
 ### Direct authenticated gateway for Mind Palace
 
-When the OpenAI tunnel is unavailable, the self-hosted deployment can expose a dedicated OAuth-protected gateway using Tailscale Funnel on port 10000. The Workshop website, REST project API, account login, storage, and private MCP ingress remain Tailscale-only. The gateway forwards only MCP, OAuth discovery, client registration, authorization, token exchange, revocation, authenticated OpenID user information, and public signing keys. It strips private transport credentials and Tailscale identity headers, so public requests always need normal OAuth authorization to access projects.
+When the OpenAI tunnel is unavailable, the self-hosted deployment can expose a dedicated OAuth-protected gateway using Tailscale Funnel. A dedicated userspace Tailscale node serves standard HTTPS port 443; the existing host can also use port 10000. The Workshop website, REST project API, account login, storage, and private MCP ingress remain Tailscale-only. The gateway forwards only MCP, OAuth discovery, client registration, authorization, token exchange, revocation, authenticated OpenID user information, and public signing keys. It strips private transport credentials and Tailscale identity headers, so public requests always need normal OAuth authorization to access projects.
 
 From the repository checkout, prepare the existing Mind Palace deployment over SSH, then deploy:
 
@@ -32,7 +32,16 @@ pnpm deploy:production
 
 Enable Funnel in the tailnet policy for the Mind Palace node only: add a `nodeAttrs` entry targeting its Tailscale IP with `attr: ["funnel"]`. The default Funnel onboarding button instead grants that capability to every member. The operator must approve the scoped network-policy change before activation.
 
-The preparation script backs up `.env`, preserves `WEB_ORIGIN`, selects the node's HTTPS port 10000 for `API_ORIGIN` and the canonical MCP resource, and enables the `public-mcp` deployment profile. Deployment activates only that dedicated Funnel listener; it does not reset existing Serve routes. The browser-facing login and consent pages continue using the private website.
+The preparation script backs up `.env`, preserves `WEB_ORIGIN`, selects the host's HTTPS port 10000, and enables `public-mcp`. For clients requiring standard HTTPS, enroll a dedicated `workshop-mcp` userspace node instead. Persist its state in `/home/mind-palace/services/latex-workshop/runtime/public-mcp-tailscale` (mode 700, owner 1000), grant Funnel only to that node's assigned IP, and configure:
+
+```dotenv
+PUBLIC_MCP_GATEWAY_ENABLED=true
+PUBLIC_MCP_DEDICATED_TAILSCALE=true
+API_ORIGIN=https://workshop-mcp.tail7e24aa.ts.net/latex-workshop
+AGENT_MCP_RESOURCE_URL=https://workshop-mcp.tail7e24aa.ts.net/latex-workshop/api/mcp
+```
+
+The pinned, unprivileged `public-mcp-tailscale` service uses userspace networking, publishes no host ports, and forwards its HTTPS listener only to the isolated public MCP proxy. Enroll it once with `tailscale --socket=/tmp/tailscaled.sock up --hostname=workshop-mcp --advertise-tags=tag:server --accept-dns=false --accept-routes=false`; finish the owner login before deployment health verification. Back up the private node state with the host configuration and never include it in a release archive. Deployment preserves the node identity and activates Funnel on port 443 without changing existing host Serve routes. The browser-facing login and consent pages continue using the private website.
 
 In ChatGPT, add a custom MCP server with **Server URL** set to the printed gateway URL and **OAuth** authentication. Connect once and select the authorized projects in Workshop's consent page. Request `offline_access` so ChatGPT can rotate access tokens automatically. Access tokens remain short-lived. Rotation renews the existing refresh-token retention window (one year by default), so active connections continue automatically; the owner can revoke the connection immediately under Account settings → Agent access. Do not choose **No authentication** for the public gateway.
 
@@ -60,8 +69,8 @@ Replace the example hostname with the deployed Mind Palace origin. Route `/api/m
 2. Open [ChatGPT Plugins](https://chatgpt.com/plugins), select the plus button, and create **Mind Palace LaTeX Workshop**. For a private deployment choose **Tunnel** and select the configured tunnel. For a public deployment, register the exact production `/api/mcp` URL.
 3. Choose CIMD rather than dynamic client registration. Complete the OAuth flow and grant a non-production test project.
 4. Exercise every tool and verify that `list_projects` returns `manageAccessUrl`, `edit_project` applies live source with an undo checkpoint, repeated edits see owner changes, and optional proposal handoff returns `reviewUrl` without applying source.
-5. Copy the technical app id from the browser URL. It starts with `plugin_asdk_app_`.
-6. Replace `plugin_asdk_app_REPLACE_AFTER_CHATGPT_REGISTRATION` in `plugins/latex-workshop/.app.json` with that production app id. The id is deployment metadata, not a credential.
+5. Copy the technical app id from the verified app registration. The underlying app id starts with `asdk_app_`; the browser plugin wrapper starts with `plugin_asdk_app_`.
+6. Replace the app binding in `plugins/latex-workshop/.app.json` with that production app id. The id is deployment metadata, not a credential.
 
 ## 3. Import the workspace plugin
 
