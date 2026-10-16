@@ -1,6 +1,6 @@
 # ChatGPT web rollout
 
-LaTeX Workshop reaches ChatGPT through the production Streamable HTTP MCP endpoint. ChatGPT never needs local filesystem access: the workspace plugin supplies the workflow, and its registered app supplies authenticated project tools.
+LaTeX Workshop reaches ChatGPT through the production Streamable HTTP MCP endpoint. ChatGPT never needs local filesystem access: a registered custom MCP app supplies authenticated project tools. The portable repository plugin supplies the workflow and a direct MCP declaration for Work and Codex.
 
 ## 1. Choose public or private transport
 
@@ -70,7 +70,7 @@ Replace the example hostname with the deployed Mind Palace origin. Route `/api/m
 3. Choose CIMD rather than dynamic client registration. Complete the OAuth flow and grant a non-production test project.
 4. Exercise every tool and verify that `list_projects` returns `manageAccessUrl`, `edit_project` applies live source with an undo checkpoint, repeated edits see owner changes, and optional proposal handoff returns `reviewUrl` without applying source.
 5. Copy the technical app id from the verified app registration. The underlying app id starts with `asdk_app_`; the browser plugin wrapper starts with `plugin_asdk_app_`.
-6. Replace the app binding in `plugins/latex-workshop/.app.json` with that production app id. The id is deployment metadata, not a credential.
+6. Record the verified app id with the deployment notes. The portable repository plugin uses `mcp.json` directly and does not contain a placeholder app binding.
 
 ## 3. Import the workspace plugin
 
@@ -83,7 +83,7 @@ rules do not bypass connection or authorization requirements.
 
 1. Push the repository revision containing `.agents/plugins/marketplace.json` and `plugins/latex-workshop` to GitHub.
 2. In **Admin → Plugins**, choose **Add → Import marketplace** and enter the repository URL. Leave **Path** empty because the marketplace is rooted at the repository root.
-3. Open the imported **LaTeX Workshop** plugin, enable its registered app, and set the installation policy to **Installed** for eligible roles. GitHub import does not apply repository policy values automatically.
+3. Open the imported **LaTeX Workshop** plugin and set the installation policy to **Installed** for eligible roles. GitHub import does not apply repository policy values automatically. Direct MCP plugins may open in the desktop app; ChatGPT website connections use the custom app registered in step 2.
 4. Set authentication to occur on first use. Configure action policies to allow the authorized read, direct-edit, compile, creation, rename, and optional proposal workflows without repeated confirmations. The server handles undo checkpoints and compare-and-swap conflict protection. Client action policies are independent of server-side proposal review; changing the MCP alone does not override a client confirmation policy.
 5. On Enterprise/Edu, start with a pilot role. On Business, validate with workspace admins before enabling it for the workspace.
 

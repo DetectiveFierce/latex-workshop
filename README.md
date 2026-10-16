@@ -53,11 +53,10 @@ Owner-only Tailscale devices and the private ChatGPT tunnel can instead authenti
 through [private agent ingress](docs/self-hosting.md#automatic-private-agent-authentication), with
 separate revocable service connections and no recurring Workshop OAuth login.
 
-For ChatGPT on the web, use the repository workspace plugin instead of adding a raw MCP declaration:
-the plugin references a registered ChatGPT app and bundles the workflow that routes LaTeX Workshop
-requests to `list_projects`. Follow [the ChatGPT web rollout](docs/chatgpt-web.md) to register the
-production endpoint, replace the deployment app id, import the GitHub marketplace, and configure
-workspace installation and action policies.
+For ChatGPT on the web, register the production endpoint as a custom OAuth MCP app using
+[the ChatGPT web rollout](docs/chatgpt-web.md). The portable repository plugin bundles the same
+workflow and a direct OAuth MCP declaration for Work and Codex. Its server URL is deployment
+metadata; no placeholder app registration is required in the source package.
 
 Dynamic client registration is off by default. Enable `AGENT_MCP_DCR_ENABLED=true` only for older
 clients that cannot use client ID metadata documents. Keep the configured read/write limits in
