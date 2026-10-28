@@ -15,3 +15,9 @@ test-results
 **/*.test.ts
 **/*.test.tsx
 **/*.tsbuildinfo
+
+# Local credentials never belong in build contexts.
+.env
+.env.*
+!.env.example
+infra/openai-mcp-tunnel/secrets

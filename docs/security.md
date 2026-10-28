@@ -24,10 +24,10 @@ Access to the container daemon is equivalent to host authority. Restrict it to d
 
 ## Dependency security pins
 
-The root `pnpm.overrides` pins DOMPurify to 3.4.16 and the existing fast-uri and
+The root `pnpm.overrides` pins DOMPurify to 3.4.17 and the existing fast-uri and
 brace-expansion major versions to their patched releases. These transitive pins cover
-[DOMPurify's detached-subtree advisory](https://github.com/advisories/GHSA-p98j-92pf-mc4p),
-[fast-uri's host-normalization advisory](https://github.com/advisories/GHSA-hrr3-gc8f-f4qj), and
+[DOMPurify's shadow-root sanitization advisory](https://github.com/advisories/GHSA-cg2g-xh64-v4q7),
+[fast-uri's validation-bypass advisory](https://github.com/advisories/GHSA-w74x-v6f9-j3xg), and
 [brace-expansion's CPU-exhaustion advisory](https://github.com/advisories/GHSA-q2hr-2g5m-vwhr).
 Remove a pin when every parent dependency resolves to an equally safe version without it;
 keep `pnpm security:audit` as the release gate. Fastify is updated directly in the API and

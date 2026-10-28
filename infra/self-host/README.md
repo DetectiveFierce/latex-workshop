@@ -16,7 +16,9 @@ fast deployment skips those checks and backup. A dry run validates and previews 
 
 Before activation, the deployment records the active service images and the separate service, web,
 and TeX image settings under `runtime/release-state/RELEASE_ID` on the host. This preserves a web-only
-hotfix and gateway images independently. Pre-migration activation failures restore that exact state.
+hotfix and gateway images independently. Activation failures restore that exact state before migration, or after migration when the current
+and candidate migration histories are identical. Failures after a changed migration starts require
+a forward fix or verified data recovery.
 The deployment retains source releases and image tags; remove obsolete targets only after deciding
 which recovery points to keep.
 

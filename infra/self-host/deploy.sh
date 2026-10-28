@@ -79,6 +79,14 @@ while (($#)); do
   esac
 done
 
+# SSH reconstructs remote command arguments through a shell. Restrict destination
+# values before using them in SSH commands or rsync's remote-path syntax.
+[[ $target_host =~ ^[A-Za-z0-9_][A-Za-z0-9_.@:-]*$ ]] || { echo 'Unsupported SSH host.' >&2; exit 2; }
+[[ $deploy_root =~ ^/[A-Za-z0-9_./-]+$ && $deploy_root != / && $deploy_root != */../* && $deploy_root != */.. && $deploy_root != */./* && $deploy_root != */. ]] || {
+  echo 'Deployment root must be an absolute path without spaces, shell characters, or traversal.' >&2
+  exit 2
+}
+
 for command_name in ssh rsync sha256sum pnpm; do
   command -v "$command_name" >/dev/null || {
     echo "Required command is missing: $command_name" >&2
@@ -108,6 +116,8 @@ write_source_manifest() {
     ! -path '*/data/*' \
     ! -path '*/tmp/*' \
     ! -name '.env' \
+    \( ! -name '.env.*' -o -name '.env.example' \) \
+    ! -path './infra/openai-mcp-tunnel/secrets/*' \
     ! -name '*.tsbuildinfo' \
     ! -name 'SHA256SUMS' \
     -print0 |
@@ -206,7 +216,10 @@ rsync_options=(
   --exclude test-results
   --exclude playwright-report
   --exclude coverage
+  --include .env.example
   --exclude .env
+  --exclude '.env.*'
+  --exclude /infra/openai-mcp-tunnel/secrets
   --exclude '*.tsbuildinfo'
   --exclude SHA256SUMS
   --exclude data
@@ -336,14 +349,29 @@ if [[ -n $previous_release ]]; then
 fi
 activated=false
 migration_started=false
+schema_unchanged=false
+if [[ -n $previous_release && $(release_schema_digest "$previous_release") == "$(release_schema_digest "$release_dir")" ]]; then
+  schema_unchanged=true
+fi
 
-rollback_before_migration() {
-  if [[ $activated == true && $migration_started == false && -n $previous_release ]]; then
-    echo "Deployment failed before migration; restoring release ${previous_release##*/}" >&2
-    release_state_activate "$deploy_root" "$previous_release"
+rollback_on_failure() {
+  status=$?
+  trap - EXIT
+  if [[ $status != 0 && $activated == true && -n $previous_release ]]; then
+    if [[ $migration_started == false || $schema_unchanged == true ]]; then
+      echo "Deployment failed; restoring exact runtime state for ${previous_release##*/}" >&2
+      if release_state_activate "$deploy_root" "$previous_release"; then
+        echo 'Previous runtime restored.' >&2
+      else
+        echo 'Automatic runtime restoration failed; inspect saved release-state and container health.' >&2
+      fi
+    else
+      echo 'Deployment failed after database migration began and migration histories differ. A forward fix or verified data recovery is required; runtime images were retained.' >&2
+    fi
   fi
+  exit "$status"
 }
-trap rollback_before_migration ERR
+trap rollback_on_failure EXIT
 
 activated=true
 LATEX_WORKSHOP_ROOT="$deploy_root" "$release_dir/infra/self-host/initialize-host.sh" "$release_id" "$texlive_image"
@@ -464,7 +492,7 @@ elif grep -Eq '^AGENT_MCP_TUNNEL_KEY=[a-f0-9]{64}$' "$env_file"; then
   fi
 fi
 
-trap - ERR
+trap - EXIT
 "${compose[@]}" rm -f minio-init texlive-image </dev/null
 
 # Keep all rollback targets and image tags. Pruning is a separate reviewed operation.

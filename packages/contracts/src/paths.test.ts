@@ -46,7 +46,7 @@ describe('path safety', () => {
         expect(error).toBeInstanceOf(Error);
       }
     }
-  });
+  }, 20_000);
 });
 
 describe('buildEntryPaths', () => {

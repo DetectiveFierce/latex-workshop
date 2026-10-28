@@ -14,6 +14,14 @@ while (($#)); do
     *) [[ -z $release ]] || { echo 'Specify one release ID.' >&2; exit 2; }; release=$1; shift ;;
   esac
 done
+# SSH reconstructs remote command arguments through a shell. Restrict destination
+# values before using them in SSH commands or rsync's remote-path syntax.
+[[ $host =~ ^[A-Za-z0-9_][A-Za-z0-9_.@:-]*$ ]] || { echo 'Unsupported SSH host.' >&2; exit 2; }
+[[ $root =~ ^/[A-Za-z0-9_./-]+$ && $root != / && $root != */../* && $root != */.. && $root != */./* && $root != */. ]] || {
+  echo 'Deployment root must be an absolute path without spaces, shell characters, or traversal.' >&2
+  exit 2
+}
+
 [[ $release =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$ && $release != . && $release != .. ]] || { echo 'A valid release ID is required.' >&2; exit 2; }
 script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 {

@@ -72,5 +72,59 @@ class DeploymentRecovery(unittest.TestCase):
             self.assertIn('services.yml up -d --no-build --pull never --wait', (root / 'docker.log').read_text())
 
 
+    def test_transfer_and_source_digest_exclude_the_same_files(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / 'source'
+            destination = root / 'destination'
+            source.mkdir()
+            destination.mkdir()
+            for name in ('src/app.ts', 'public/icon.svg', '.env', '.env.local', '.env.example', 'nested/.env', 'nested/.env.production', 'nested/.env.example', 'infra/openai-mcp-tunnel/secrets/private.key', '.git/HEAD', 'nested/.git', 'coverage/result.txt', 'nested/coverage/result.txt', 'nested/node_modules/cache.js', 'nested/dist/app.js', 'nested/data/private.txt', 'nested/tmp/cache.txt', 'nested/.turbo/cache.txt', 'nested/test-results/result.txt', 'nested/playwright-report/report.html', 'src/file.tsbuildinfo'):
+                file = source / name
+                file.parent.mkdir(parents=True, exist_ok=True)
+                file.write_text('fixture\n')
+            script = (Path(__file__).parent / 'deploy.sh').read_text()
+            options = 'rsync_options=(' + script.split('rsync_options=(', 1)[1].split('\n)', 1)[0] + '\n)'
+            function = 'write_source_manifest() {' + script.split('write_source_manifest() {', 1)[1].split('\n}\n', 1)[0] + '\n}'
+            command = options + '\n' + function + '\nwrite_source_manifest "$1/manifest"\nrsync "${rsync_options[@]}" ./ "$1/destination/"\n(cd "$1/destination" && sha256sum --check --strict "$1/manifest")'
+            result = subprocess.run(['bash', '-e', '-c', command, '--', str(root)], cwd=source, capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertFalse((destination / '.env').exists())
+            self.assertFalse((destination / 'nested/.env').exists())
+            self.assertFalse((destination / '.env.local').exists())
+            self.assertFalse((destination / 'nested/.env.production').exists())
+            self.assertFalse((destination / 'infra/openai-mcp-tunnel/secrets/private.key').exists())
+            self.assertTrue((destination / '.env.example').is_file())
+            self.assertTrue((destination / 'nested/.env.example').is_file())
+            self.assertTrue((destination / 'public/icon.svg').is_file())
+
+    def test_shell_characters_in_remote_root_are_rejected(self):
+        script = Path(__file__).parent / 'deploy.sh'
+        result = subprocess.run(['bash', str(script), '--fast', '--dry-run', '--deploy-root', '/tmp/root;echo injected'], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 2)
+        self.assertIn('Deployment root must be', result.stderr)
+
+
+    def check_failure_after_migration(self, unchanged):
+        with tempfile.TemporaryDirectory() as directory:
+            script = (SCRIPTS / 'deploy.sh').read_text()
+            trap = 'rollback_on_failure() {' + script.split('rollback_on_failure() {', 1)[1].split('trap rollback_on_failure EXIT', 1)[0] + 'trap rollback_on_failure EXIT\n'
+            root = Path(directory)
+            setup = 'set -Eeuo pipefail\nactivated=true\nmigration_started=true\nschema_unchanged=' + str(unchanged).lower() + '\nprevious_release=/releases/previous\ndeploy_root="$1"\nrelease_state_activate() { printf restored >"$deploy_root/restored"; }\n'
+            result = subprocess.run(['bash', '-c', setup + trap + '\nexit 23\n', '--', str(root)], capture_output=True, text=True)
+            self.assertEqual(result.returncode, 23)
+            self.assertEqual((root / 'restored').exists(), unchanged)
+            if unchanged:
+                self.assertIn('Previous runtime restored', result.stderr)
+            else:
+                self.assertIn('migration histories differ', result.stderr)
+
+    def test_health_failure_after_unchanged_migration_restores_images(self):
+        self.check_failure_after_migration(True)
+
+    def test_changed_migration_failure_requires_data_or_forward_recovery(self):
+        self.check_failure_after_migration(False)
+
+
 if __name__ == '__main__':
     unittest.main()

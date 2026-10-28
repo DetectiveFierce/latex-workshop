@@ -17,9 +17,9 @@
     "@latex-workshop/contracts": "workspace:*",
     "@latex-workshop/db": "workspace:*",
     "@latex-workshop/storage": "workspace:*",
-    "better-auth": "1.7.4",
+    "better-auth": "1.7.7",
     "drizzle-orm": "0.45.2",
-    "fastify": "5.12.5",
+    "fastify": "5.12.6",
     "ws": "8.21.3"
   },
   "devDependencies": {
