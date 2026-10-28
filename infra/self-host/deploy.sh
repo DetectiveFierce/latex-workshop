@@ -498,9 +498,8 @@ trap - EXIT
 # Keep all rollback targets and image tags. Pruning is a separate reviewed operation.
 release_state_capture "$deploy_root" "$release_dir"
 
-if [[ $deployment_mode == production ]]; then
-  nohup docker builder prune --force --filter until=168h >/dev/null 2>&1 </dev/null &
-fi
+# Cache cleanup is a separate operator command. A background child here inherits
+# the deployment flock and can keep rollback locked after this script exits.
 echo "Activated release $release_id"
 REMOTE_DEPLOY
 

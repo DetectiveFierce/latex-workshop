@@ -163,6 +163,12 @@ class DeploymentRecovery(unittest.TestCase):
     def test_changed_migration_failure_requires_data_or_forward_recovery(self):
         self.check_failure_after_migration(False)
 
+    def test_success_releases_lock_without_background_cleanup(self):
+        script = (SCRIPTS / 'deploy.sh').read_text()
+        success = script.split('release_state_capture "$deploy_root" "$release_dir"', 1)[1]
+        self.assertNotIn('nohup ', success)
+        self.assertNotIn('docker builder prune', success)
+
 
 if __name__ == '__main__':
     unittest.main()
