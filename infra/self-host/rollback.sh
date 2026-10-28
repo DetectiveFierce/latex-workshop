@@ -45,6 +45,7 @@ state="$root/runtime/release-state/$id"
 [[ -f $state/images.env && -f $state/services.yml && -s $state/services.txt ]] || { echo 'Target has no saved runtime image state.' >&2; exit 1; }
 while IFS= read -r image; do docker image inspect "$image" >/dev/null; done < <(sed -n 's/.*image: "\(sha256:[a-f0-9]*\)"/\1/p' "$state/services.yml")
 while IFS= read -r image; do docker image inspect "${image#*=}" >/dev/null; done <"$state/images.env"
+release_tunnel_validate "$state"
 if [[ $dry_run == true ]]; then
   echo "Rollback target $id has matching migration history and all saved images are present."
   exit 0

@@ -72,6 +72,44 @@ class DeploymentRecovery(unittest.TestCase):
             self.assertIn('services.yml up -d --no-build --pull never --wait', (root / 'docker.log').read_text())
 
 
+    def test_legacy_tunnel_snapshot_restores_files_and_exact_image(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = self.fixture(directory)
+            tunnel = root / 'external-tunnel'
+            tunnel.mkdir()
+            state = root / 'runtime/release-state/old'
+            state.mkdir(parents=True)
+            files = ('.env', 'compose.yml', 'compose.private.yml', 'Dockerfile', 'health.sh')
+            for file in files:
+                (tunnel / file).write_text('original ' + file + '\n')
+            with (root / '.env').open('a') as handle:
+                handle.write('AGENT_MCP_TUNNEL_KEY=' + 'a' * 64 + '\n')
+            docker = root / 'bin/docker'
+            docker.write_text('#!/bin/sh\nprintf "%s\\n" "$*" >>"$TEST_LOG"\ncase "$1" in\ninspect) printf "sha256:' + 'b' * 64 + '\\n" ;;\ncompose) case "$*" in *"ps -q tunnel-client") echo tunnel-container ;; esac ;;\nesac\n')
+            docker.chmod(0o755)
+            env = dict(os.environ, PATH=f'{root}/bin:{os.environ["PATH"]}', TEST_LOG=str(root / 'docker.log'), LATEX_WORKSHOP_TUNNEL_ROOT=str(tunnel))
+            command = 'set -e; source "$1"; release_tunnel_capture "$2" "$3"; for file in .env compose.yml compose.private.yml Dockerfile health.sh; do printf changed >"$4/$file"; done; release_tunnel_activate "$3"'
+            result = subprocess.run(['bash', '-c', command, '--', str(SCRIPTS / 'release-state.sh'), str(root), str(state), str(tunnel)], capture_output=True, text=True, env=env)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            for file in files:
+                self.assertEqual((tunnel / file).read_text(), 'original ' + file + '\n')
+            self.assertEqual((state / 'tunnel/.env').stat().st_mode & 0o777, 0o600)
+            self.assertEqual((tunnel / '.env').stat().st_mode & 0o777, 0o600)
+            self.assertIn('sha256:' + 'b' * 64, (state / 'tunnel/images.yml').read_text())
+            log = (root / 'docker.log').read_text()
+            self.assertIn('--project-directory ' + str(tunnel), log)
+            self.assertIn('up -d --no-build --pull never --wait', log)
+            self.assertIn('exec -T tunnel-client workshop-tunnel-health', log)
+
+    def test_public_gateway_snapshot_leaves_legacy_tunnel_untouched(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = self.fixture(directory)
+            with (root / '.env').open('a') as handle:
+                handle.write('PUBLIC_MCP_GATEWAY_ENABLED=true\nAGENT_MCP_TUNNEL_KEY=' + 'a' * 64 + '\n')
+            result = subprocess.run(['bash', '-c', 'source "$1"; release_tunnel_capture "$2" "$2/state"', '--', str(SCRIPTS / 'release-state.sh'), str(root)], capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertFalse((root / 'state/tunnel').exists())
+
     def test_transfer_and_source_digest_exclude_the_same_files(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

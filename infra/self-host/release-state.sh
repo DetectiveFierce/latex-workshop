@@ -1,5 +1,57 @@
 #!/usr/bin/env bash
 # Sourced by deployment and rollback while holding runtime/deploy.lock.
+# The optional hosted tunnel is a separate Compose project with mutable files.
+# Keep its credentials only in the private runtime snapshot, never in a release.
+release_tunnel_capture() {
+  local root=$1 state=$2 tunnel_root container image file
+  tunnel_root=${LATEX_WORKSHOP_TUNNEL_ROOT:-/home/mind-palace/services/openai-mcp-tunnel}
+  grep -qx 'PUBLIC_MCP_GATEWAY_ENABLED=true' "$root/.env" && return 0
+  grep -Eq '^AGENT_MCP_TUNNEL_KEY=[a-f0-9]{64}$' "$root/.env" || return 0
+  [[ -f $tunnel_root/.env && -f $tunnel_root/compose.yml && -f $tunnel_root/compose.private.yml ]] || {
+    echo 'Legacy tunnel configuration is missing; cannot capture rollback state.' >&2
+    return 1
+  }
+  container=$(docker compose --env-file "$tunnel_root/.env" -f "$tunnel_root/compose.yml" -f "$tunnel_root/compose.private.yml" ps -q tunnel-client) || return 1
+  [[ -n $container ]] || { echo 'Legacy tunnel is not running; cannot capture rollback state.' >&2; return 1; }
+  image=$(docker inspect --format '{{.Image}}' "$container") || return 1
+  [[ $image =~ ^sha256:[a-f0-9]{64}$ ]] || return 1
+  install -d -m 700 "$state/tunnel"
+  for file in .env compose.yml compose.private.yml Dockerfile health.sh; do
+    [[ -f $tunnel_root/$file ]] || { echo "Legacy tunnel file is missing: $file" >&2; return 1; }
+    install -m 600 "$tunnel_root/$file" "$state/tunnel/$file" || return 1
+  done
+  printf 'services:\n  tunnel-client:\n    image: "%s"\n' "$image" >"$state/tunnel/images.yml"
+  chmod 600 "$state/tunnel/images.yml"
+}
+
+release_tunnel_validate() {
+  local state=$1 tunnel_root file image
+  [[ -d $state/tunnel ]] || return 0
+  tunnel_root=${LATEX_WORKSHOP_TUNNEL_ROOT:-/home/mind-palace/services/openai-mcp-tunnel}
+  image=$(sed -n 's/.*image: "\(sha256:[a-f0-9]*\)"/\1/p' "$state/tunnel/images.yml")
+  [[ $image =~ ^sha256:[a-f0-9]{64}$ ]] && docker image inspect "$image" >/dev/null || return 1
+  docker compose --project-directory "$tunnel_root" --env-file "$state/tunnel/.env" -f "$state/tunnel/compose.yml" -f "$state/tunnel/compose.private.yml" -f "$state/tunnel/images.yml" config --quiet || return 1
+  for file in .env compose.yml compose.private.yml Dockerfile health.sh; do
+    [[ -f $state/tunnel/$file ]] || return 1
+  done
+}
+
+release_tunnel_activate() {
+  local state=$1 tunnel_root file mode
+  [[ -d $state/tunnel ]] || return 0
+  release_tunnel_validate "$state" || return 1
+  tunnel_root=${LATEX_WORKSHOP_TUNNEL_ROOT:-/home/mind-palace/services/openai-mcp-tunnel}
+  for file in compose.yml compose.private.yml Dockerfile health.sh .env; do
+    mode=644
+    [[ $file != .env ]] || mode=600
+    install -m "$mode" "$state/tunnel/$file" "$tunnel_root/$file" || return 1
+  done
+  docker compose --env-file "$tunnel_root/.env" -f "$tunnel_root/compose.yml" -f "$tunnel_root/compose.private.yml" -f "$state/tunnel/images.yml" \
+    up -d --no-build --pull never --wait --wait-timeout 120 || return 1
+  docker compose --env-file "$tunnel_root/.env" -f "$tunnel_root/compose.yml" -f "$tunnel_root/compose.private.yml" -f "$state/tunnel/images.yml" \
+    exec -T tunnel-client workshop-tunnel-health
+}
+
 release_state_capture() {
   local root=$1 release=$2 state tmp service container image
   state="$root/runtime/release-state/${release##*/}"
@@ -20,6 +72,8 @@ release_state_capture() {
   chmod 600 "$tmp/"*
   mv "$tmp/images.env" "$tmp/services.yml" "$tmp/services.txt" "$state/"
   rmdir "$tmp"
+  rm -rf -- "$state/tunnel"
+  release_tunnel_capture "$root" "$state"
 }
 
 release_state_activate() {
@@ -42,6 +96,7 @@ release_state_activate() {
       echo 'Saved image environment is incomplete.' >&2
       return 1
     }
+  release_tunnel_validate "$state" || return 1
   tmp=$(mktemp "$root/.env.rollback.XXXXXX") || return 1
   sed '/^SERVICE_IMAGE=/d; /^WEB_IMAGE=/d; /^TEXLIVE_IMAGE=/d' "$root/.env" >"$tmp"
   cat "$state/images.env" >>"$tmp"
@@ -56,7 +111,8 @@ release_state_activate() {
   local services=()
   while IFS= read -r service; do services+=("$service"); done <"$state/services.txt"
   docker compose --env-file "$root/.env" -f "$release/infra/compose/self-hosted.yml" -f "$state/services.yml" \
-    up -d --no-build --pull never --wait --wait-timeout 180 "${services[@]}"
+    up -d --no-build --pull never --wait --wait-timeout 180 "${services[@]}" || return 1
+  release_tunnel_activate "$state"
 }
 
 release_schema_digest() {

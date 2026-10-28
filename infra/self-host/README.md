@@ -16,7 +16,11 @@ fast deployment skips those checks and backup. A dry run validates and previews 
 
 Before activation, the deployment records the active service images and the separate service, web,
 and TeX image settings under `runtime/release-state/RELEASE_ID` on the host. This preserves a web-only
-hotfix and gateway images independently. Activation failures restore that exact state before migration, or after migration when the current
+hotfix and gateway images independently. In legacy hosted-tunnel mode, the same private snapshot
+also records the separate tunnel container image and its configuration files, including its private
+`.env`. Recovery restores and health-checks that exact tunnel image. Public-gateway mode leaves the
+legacy tunnel unchanged. Keep `runtime/release-state` private and outside source control.
+Activation failures restore that exact state before migration, or after migration when the current
 and candidate migration histories are identical. Failures after a changed migration starts require
 a forward fix or verified data recovery.
 The deployment retains source releases and image tags; remove obsolete targets only after deciding
