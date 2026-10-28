@@ -97,16 +97,16 @@ fi
 write_source_manifest() {
   local destination=$1
   find . -type f \
-    ! -path './.git' \
-    ! -path './.git/*' \
+    ! -name '.git' \
+    ! -path '*/.git/*' \
     ! -path '*/node_modules/*' \
     ! -path '*/.turbo/*' \
     ! -path '*/dist/*' \
-    ! -path './test-results/*' \
-    ! -path './playwright-report/*' \
-    ! -path './coverage/*' \
-    ! -path './data/*' \
-    ! -path './tmp/*' \
+    ! -path '*/test-results/*' \
+    ! -path '*/playwright-report/*' \
+    ! -path '*/coverage/*' \
+    ! -path '*/data/*' \
+    ! -path '*/tmp/*' \
     ! -name '.env' \
     ! -name '*.tsbuildinfo' \
     ! -name 'SHA256SUMS' \
@@ -220,7 +220,7 @@ if [[ $dry_run == true ]]; then
   exit 0
 fi
 
-ssh "$target_host" install -d -m 755 "$incoming_dir"
+ssh "$target_host" mkdir -m 755 -- "$incoming_dir"
 incoming_created=true
 rsync "${rsync_options[@]}" ./ "$target_host:$incoming_dir/"
 rsync --archive "$source_manifest" "$target_host:$incoming_dir/SHA256SUMS"
@@ -323,29 +323,30 @@ if [[ $deployment_mode == production ]]; then
   current_release=$(readlink -f "$deploy_root/current" 2>/dev/null || true)
   if [[ -n $current_release ]]; then
     echo 'Backing up the live database and object storage before migration...'
-    LATEX_WORKSHOP_ROOT="$deploy_root" "$current_release/infra/self-host/backup.sh" </dev/null
+    LATEX_WORKSHOP_ROOT="$deploy_root" "$release_dir/infra/self-host/backup.sh" </dev/null
   else
     echo 'No active release exists yet; skipping the pre-deployment backup.'
   fi
 fi
 
 previous_release=$(readlink -f "$deploy_root/current" 2>/dev/null || true)
-previous_texlive_image=$(sed -n 's/^TEXLIVE_IMAGE=//p' "$env_file" | tail -1)
+source "$release_dir/infra/self-host/release-state.sh"
+if [[ -n $previous_release ]]; then
+  release_state_capture "$deploy_root" "$previous_release"
+fi
 activated=false
 migration_started=false
 
 rollback_before_migration() {
   if [[ $activated == true && $migration_started == false && -n $previous_release ]]; then
-    previous_id=${previous_release##*/}
-    echo "Deployment failed before migration; restoring release $previous_id" >&2
-    "$previous_release/infra/self-host/initialize-host.sh" \
-      "$previous_id" "$previous_texlive_image"
+    echo "Deployment failed before migration; restoring release ${previous_release##*/}" >&2
+    release_state_activate "$deploy_root" "$previous_release"
   fi
 }
 trap rollback_before_migration ERR
 
-"$release_dir/infra/self-host/initialize-host.sh" "$release_id" "$texlive_image"
 activated=true
+LATEX_WORKSHOP_ROOT="$deploy_root" "$release_dir/infra/self-host/initialize-host.sh" "$release_id" "$texlive_image"
 compose=(docker compose --env-file "$env_file" -f "$deploy_root/current/infra/compose/self-hosted.yml")
 "${compose[@]}" config --quiet </dev/null
 "${compose[@]}" up -d postgres redis minio mailpit minio-init </dev/null
@@ -466,22 +467,8 @@ fi
 trap - ERR
 "${compose[@]}" rm -f minio-init texlive-image </dev/null
 
-current_release=$(readlink -f "$deploy_root/current")
-active_texlive_image=$(sed -n 's/^TEXLIVE_IMAGE=//p' "$env_file" | tail -1)
-previous_release=$(find "$deploy_root/releases" -mindepth 1 -maxdepth 1 -type d \
-  ! -name '.incoming-*' -printf '%T@ %p\n' | sort -nr | cut -d' ' -f2- | \
-  grep -Fxv "$current_release" | head -1 || true)
-while IFS= read -r old_release; do
-  [[ $old_release == "$current_release" || $old_release == "$previous_release" ]] && continue
-  old_id=${old_release##*/}
-  docker image rm "latex-workshop-web:$old_id" "latex-workshop-services:$old_id" \
-    "latex-workshop-openai-tunnel:$old_id" \
-    2>/dev/null || true
-  if [[ $active_texlive_image != "latex-workshop-texlive:$old_id" ]]; then
-    docker image rm "latex-workshop-texlive:$old_id" 2>/dev/null || true
-  fi
-  rm -rf -- "$old_release"
-done < <(find "$deploy_root/releases" -mindepth 1 -maxdepth 1 -type d ! -name '.incoming-*' -print)
+# Keep all rollback targets and image tags. Pruning is a separate reviewed operation.
+release_state_capture "$deploy_root" "$release_dir"
 
 if [[ $deployment_mode == production ]]; then
   nohup docker builder prune --force --filter until=168h >/dev/null 2>&1 </dev/null &

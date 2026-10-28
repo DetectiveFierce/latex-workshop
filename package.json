@@ -22,7 +22,8 @@
     "db:migrate": "pnpm --filter @latex-workshop/db migrate",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "security:audit": "pnpm audit"
+    "security:audit": "pnpm audit",
+    "deploy:rollback": "infra/self-host/rollback.sh"
   },
   "devDependencies": {
     "@axe-core/playwright": "4.13.0",

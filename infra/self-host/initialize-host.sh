@@ -7,6 +7,9 @@ if [ "$#" -lt 1 ] || [ "$#" -gt 2 ]; then
 fi
 
 release_id=$1
+case $release_id in
+  '' | *[!A-Za-z0-9._-]* | . | ..) echo 'Invalid release ID.' >&2; exit 2 ;;
+esac
 texlive_image=${2:-latex-workshop-texlive:$release_id}
 deploy_root=${LATEX_WORKSHOP_ROOT:-/home/mind-palace/services/latex-workshop}
 release_dir=$deploy_root/releases/$release_id
@@ -57,12 +60,8 @@ if [ ! -f "$env_file" ]; then
   chmod 600 "$env_file"
 fi
 
-grep -q '^BACKUP_UID=' "$env_file" || printf 'BACKUP_UID=%s\n' "$(id -u)" >>"$env_file"
-grep -q '^BACKUP_GID=' "$env_file" || printf 'BACKUP_GID=%s\n' "$(id -g)" >>"$env_file"
-grep -q '^ADDITIONAL_TRUSTED_ORIGINS=' "$env_file" || \
-  printf '%s\n' 'ADDITIONAL_TRUSTED_ORIGINS=https://mind-palace' >>"$env_file"
-
-tmp_env=$deploy_root/.env.next
+tmp_env=$(mktemp "$deploy_root/.env.next.XXXXXX")
+trap 'rm -f "$tmp_env"' EXIT HUP INT TERM
 sed \
   -e '/^SERVICE_IMAGE=/d' \
   -e '/^WEB_IMAGE=/d' \
@@ -72,13 +71,18 @@ printf '%s\n' \
   "SERVICE_IMAGE=latex-workshop-services:$release_id" \
   "WEB_IMAGE=latex-workshop-web:$release_id" \
   "TEXLIVE_IMAGE=$texlive_image" >>"$tmp_env"
+grep -q '^BACKUP_UID=' "$tmp_env" || printf 'BACKUP_UID=%s\n' "$(id -u)" >>"$tmp_env"
+grep -q '^BACKUP_GID=' "$tmp_env" || printf 'BACKUP_GID=%s\n' "$(id -g)" >>"$tmp_env"
+grep -q '^ADDITIONAL_TRUSTED_ORIGINS=' "$tmp_env" || \
+  printf '%s\n' 'ADDITIONAL_TRUSTED_ORIGINS=https://mind-palace' >>"$tmp_env"
 chmod 600 "$tmp_env"
-mv "$tmp_env" "$env_file"
-
-ln -sfn "$release_dir" "$deploy_root/current"
 docker compose \
-  --env-file "$env_file" \
-  -f "$deploy_root/current/infra/compose/self-hosted.yml" \
+  --env-file "$tmp_env" \
+  -f "$release_dir/infra/compose/self-hosted.yml" \
   config --quiet
+mv "$tmp_env" "$env_file"
+next_link=$deploy_root/.current-next-$$
+ln -s "$release_dir" "$next_link"
+mv -Tf "$next_link" "$deploy_root/current"
 
 printf 'Activated release %s\n' "$release_id"

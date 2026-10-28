@@ -1,11 +1,12 @@
 #!/bin/sh
 set -eu
+umask 077
 
 deploy_root=${LATEX_WORKSHOP_ROOT:-/home/mind-palace/services/latex-workshop}
 compose_file=$deploy_root/current/infra/compose/self-hosted.yml
 env_file=$deploy_root/.env
 stage_dir=$deploy_root/runtime/backup-stage
-backup_root=${LATEX_WORKSHOP_BACKUP_ROOT:-/home/mind-palace/docker/syncthing/data/landing_zone/Backups/latex-workshop}
+backup_root=${LATEX_WORKSHOP_BACKUP_ROOT:-/home/mind-palace/data/landing-zone/Backups/latex-workshop}
 lock_file=$deploy_root/runtime/backup.lock
 timestamp=$(date -u +%Y%m%dT%H%M%SZ)
 partial=$backup_root/.latex-workshop-$timestamp.tar.gz.partial
