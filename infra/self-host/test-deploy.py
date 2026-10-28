@@ -165,9 +165,16 @@ class DeploymentRecovery(unittest.TestCase):
 
     def test_success_releases_lock_without_background_cleanup(self):
         script = (SCRIPTS / 'deploy.sh').read_text()
-        success = script.split('release_state_capture "$deploy_root" "$release_dir"', 1)[1]
-        self.assertNotIn('nohup ', success)
-        self.assertNotIn('docker builder prune', success)
+        success = script.rsplit('release_state_capture "$deploy_root" "$release_dir"', 1)[1].split('\nREMOTE_DEPLOY', 1)[0]
+        with tempfile.TemporaryDirectory() as directory:
+            lock = Path(directory) / 'deploy.lock'
+            # A harmless mock background cleanup holds inherited descriptors,
+            # reproducing the live failure without running Docker or pruning.
+            setup = 'set -eu\nexec 9>"$1"\nflock -n 9\ndeployment_mode=production\nrelease_id=test\nnohup() { sleep 2; }\n'
+            result = subprocess.run(['bash', '-c', setup + success, '--', str(lock)], capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            acquired = subprocess.run(['flock', '-n', str(lock), 'true'])
+            self.assertEqual(acquired.returncode, 0, 'Successful deployment left the rollback lock held')
 
 
 if __name__ == '__main__':
