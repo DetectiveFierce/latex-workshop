@@ -17,10 +17,15 @@ COPY packages/config ./packages/config
 COPY packages/contracts ./packages/contracts
 COPY packages/db ./packages/db
 COPY packages/storage ./packages/storage
-RUN pnpm exec turbo run build \
-  --filter=@latex-workshop/api \
-  --filter=@latex-workshop/compile-worker \
-  --filter=@latex-workshop/language-service
+ARG SERVICE_FILTER=all
+# The centralized pipeline builds only the selected process and its packages.
+# Keep the combined image available for standalone/local Compose workflows.
+RUN case "$SERVICE_FILTER" in \
+      all) pnpm exec turbo run build --filter=@latex-workshop/api --filter=@latex-workshop/compile-worker --filter=@latex-workshop/language-service ;; \
+      @latex-workshop/api|@latex-workshop/compile-worker|@latex-workshop/language-service) \
+        pnpm exec turbo run build --filter="$SERVICE_FILTER" ;; \
+      *) echo 'Unsupported SERVICE_FILTER' >&2; exit 2 ;; \
+    esac
 
 FROM node:24-bookworm-slim@sha256:ba849c60be29959425b8734d57b8b4b7d56f98edd9504c9af091d5281095a71e AS runtime
 ARG TEXLAB_VERSION=5.25.1

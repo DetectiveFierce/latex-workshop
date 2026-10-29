@@ -80,9 +80,17 @@ Docker is available.
 
 ## Deployment discipline
 
-- `pnpm deploy:fast` is for iteration: it intentionally skips local checks and backup.
-- `pnpm deploy:production` runs the dependency audit and release gate, takes a pre-migration backup,
-  builds versioned images, verifies the transfer digest, migrates once, health-checks, and activates.
+- In the canonical Mind Palace workspace, use the parent `./deploy` pipeline and its
+  `DEPLOYMENT.md` agent guide. It hashes component inputs, runs cached targeted checks,
+  builds only affected processes, checkpoints exact images and recreates only selected services.
+  An ordinary web release does not compile backend services or TeX.
+- In that workspace, `pnpm deploy:fast` delegates to the central pipeline with targeted checks;
+  `pnpm deploy:production` delegates with the full release gate and browser checks. Both retain
+  checkpoints and health verification. Use parent `./deploy rollback RUN` for these releases.
+- Schema changes require the reviewed migration-capable legacy path and a data recovery plan:
+  `MIND_PALACE_LEGACY_DEPLOY=1 pnpm deploy:production`. This retains the pre-migration backup,
+  digest verification, migration and health checks. Reconcile the central baseline afterward.
+  Standalone clones without the parent pipeline retain this existing release implementation.
 - Keep independent local checks, image builds, and stopped-writer backup readers parallel. Do not
   parallelize activation, migration, application startup, or external health verification.
 - Keep release activation reversible until a migration starts. Never add destructive cleanup before

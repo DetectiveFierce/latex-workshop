@@ -1,6 +1,13 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
+# The canonical workspace coordinates component releases in one pipeline.
+# Standalone clones retain this migration-capable legacy implementation.
+central_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)
+if [[ -x "$central_root/deploy" && ${MIND_PALACE_LEGACY_DEPLOY:-0} != 1 ]]; then
+  exec python3 "$central_root/ops/legacy_deploy.py" latex-workshop "$@"
+fi
+
 target_host=${LATEX_DEPLOY_HOST:-mind-palace}
 deploy_root=${LATEX_WORKSHOP_ROOT:-/home/mind-palace/services/latex-workshop}
 release_id=''

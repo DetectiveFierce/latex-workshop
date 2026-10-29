@@ -1,5 +1,12 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
+
+central_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)
+if [[ -x "$central_root/deploy" && ${MIND_PALACE_LEGACY_DEPLOY:-0} != 1 ]]; then
+  echo 'Use the canonical ./deploy rollback RUN command; see DEPLOYMENT.md.' >&2
+  echo 'Historical app-only rollback requires explicit MIND_PALACE_LEGACY_DEPLOY=1.' >&2
+  exit 2
+fi
 host=${LATEX_DEPLOY_HOST:-mind-palace}
 root=${LATEX_WORKSHOP_ROOT:-/home/mind-palace/services/latex-workshop}
 release=''
