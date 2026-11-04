@@ -123,6 +123,11 @@ export function displayShortcut(binding: string | null | undefined, mac = isMacP
     .join('  ');
 }
 
+/** The compact form used in menus and hints, such as "Ctrl K" and "Ctrl ↵". */
+export function shortcutHint(binding: string | null | undefined, mac = isMacPlatform()): string {
+  return displayShortcut(binding, mac).replaceAll('+', ' ').replace('Enter', '↵');
+}
+
 export function findShortcutAction(
   resolved: Record<ShortcutActionId, string | null>,
   sequence: string,

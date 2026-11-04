@@ -143,6 +143,7 @@ export const projectTagSchema = z.object({
 export type ProjectTag = z.infer<typeof projectTagSchema>;
 
 export const libraryProjectSchema = projectSchema.extend({
+  mainFilePath: z.string().nullable().optional(),
   folderId: idSchema.nullable(),
   favorite: z.boolean(),
   lastOpenedAt: z.iso.datetime().nullable(),
@@ -1039,3 +1040,16 @@ export function buildOpenApiDocument(serverUrl: string) {
     },
   };
 }
+
+export const clearBuildCacheResponseSchema = z.object({
+  clearedEntries: z.number().int().nonnegative(),
+  invalidatedInFlight: z.number().int().nonnegative(),
+  compilationDirectories: z.literal('ephemeral'),
+});
+export type ClearBuildCacheResponse = z.infer<typeof clearBuildCacheResponseSchema>;
+
+export const librarySummaryResponseSchema = z.object({
+  lastOpenedProject: z
+    .object({ id: idSchema, name: z.string(), openedAt: z.iso.datetime().nullable() })
+    .nullable(),
+});

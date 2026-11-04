@@ -1,6 +1,7 @@
 import { useEffect, type ReactNode } from 'react';
 import * as DialogPrimitive from '@radix-ui/react-dialog';
 import { X } from 'lucide-react';
+import { useDialogReturnFocus } from '../lib/dialogReturnFocus';
 
 export function Dialog({
   open,
@@ -17,6 +18,7 @@ export function Dialog({
   children: ReactNode;
   wide?: boolean;
 }) {
+  const restoreFocus = useDialogReturnFocus(open);
   useEffect(() => {
     if (open) return;
 
@@ -38,9 +40,12 @@ export function Dialog({
   return (
     <DialogPrimitive.Root open={open} onOpenChange={onOpenChange}>
       <DialogPrimitive.Portal>
-        <DialogPrimitive.Overlay className="dialog-overlay" />
-        <DialogPrimitive.Content className={`dialog-content${wide ? ' dialog-wide' : ''}`}>
-          <div className="dialog-heading">
+        <DialogPrimitive.Overlay className="scrim dialog-overlay" />
+        <DialogPrimitive.Content
+          className={`dialog dialog-content${wide ? ' dialog-wide' : ''}`}
+          onCloseAutoFocus={restoreFocus}
+        >
+          <div className="dialog-head dialog-heading">
             <div>
               <DialogPrimitive.Title className="dialog-title">{title}</DialogPrimitive.Title>
               {description && (
@@ -49,7 +54,7 @@ export function Dialog({
                 </DialogPrimitive.Description>
               )}
             </div>
-            <DialogPrimitive.Close className="icon-button" aria-label="Close">
+            <DialogPrimitive.Close className="ib icon-button" aria-label="Close" title="Close">
               <X size={18} />
             </DialogPrimitive.Close>
           </div>

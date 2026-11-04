@@ -4,12 +4,14 @@ import {
   bulkLibraryActionSchema,
   createLibraryFolderSchema,
   createProjectTagSchema,
+  librarySummaryResponseSchema,
   updateLibraryFolderSchema,
   updateProjectTagSchema,
 } from '@latex-workshop/contracts';
 import {
   auditEvents,
   compileJobs,
+  entries,
   libraryFolders,
   projectMemberships,
   projects,
@@ -89,9 +91,10 @@ function descendantIds(all: Array<typeof libraryFolders.$inferSelect>, rootId: s
 
 async function libraryPayload(context: AppContext, userId: string, trash: boolean) {
   const rows = await context.db
-    .select({ project: projects, membership: projectMemberships })
+    .select({ project: projects, membership: projectMemberships, mainFileName: entries.name })
     .from(projects)
     .innerJoin(projectMemberships, eq(projectMemberships.projectId, projects.id))
+    .leftJoin(entries, and(eq(entries.id, projects.mainFileId), eq(entries.projectId, projects.id)))
     .where(
       and(
         eq(projectMemberships.userId, userId),
@@ -150,11 +153,12 @@ async function libraryPayload(context: AppContext, userId: string, trash: boolea
     tagsByProject.set(assignment.projectId, current);
   }
   return {
-    projects: rows.map(({ project, membership }) => ({
+    projects: rows.map(({ project, membership, mainFileName }) => ({
       id: project.id,
       name: project.name,
       compiler: project.compiler,
       mainFileId: project.mainFileId,
+      mainFilePath: mainFileName,
       autoCompile: project.autoCompile,
       sourceRevision: project.sourceRevision,
       isTemplate: project.isTemplate,
@@ -174,6 +178,29 @@ async function libraryPayload(context: AppContext, userId: string, trash: boolea
 }
 
 export async function registerLibraryRoutes(app: FastifyInstance, context: AppContext) {
+  app.get('/api/v1/library/summary', async (request) => {
+    const user = await requireUser(context, request);
+    const [latest] = await context.db
+      .select({ id: projects.id, name: projects.name, openedAt: projectMemberships.lastOpenedAt })
+      .from(projects)
+      .innerJoin(projectMemberships, eq(projectMemberships.projectId, projects.id))
+      .where(
+        and(
+          eq(projectMemberships.userId, user.id),
+          isNull(projects.trashedAt),
+          eq(projects.isTemplate, false),
+          isNotNull(projectMemberships.lastOpenedAt),
+        ),
+      )
+      .orderBy(desc(projectMemberships.lastOpenedAt))
+      .limit(1);
+    return librarySummaryResponseSchema.parse({
+      lastOpenedProject: latest
+        ? { id: latest.id, name: latest.name, openedAt: latest.openedAt?.toISOString() ?? null }
+        : null,
+    });
+  });
+
   app.get('/api/v1/library', async (request) => {
     const user = await requireUser(context, request);
     const trash = (request.query as { trash?: string }).trash === 'true';

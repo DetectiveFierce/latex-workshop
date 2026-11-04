@@ -1,7 +1,5 @@
 import { useEffect, useMemo } from 'react';
 import { Link } from '@tanstack/react-router';
-import { ArrowLeft } from 'lucide-react';
-import { Logo } from '../components/Logo';
 import {
   parseOAuthConsentQuery,
   preservedOAuthConsentQuery,
@@ -9,6 +7,7 @@ import {
 import { appPath } from '../lib/api';
 import { authClient } from '../lib/auth';
 import { AccountSettingsContent } from './AccountPage';
+import '../styles/auth.css';
 
 export function OAuthConsentPage() {
   const { data: session, isPending } = authClient.useSession();
@@ -33,37 +32,31 @@ export function OAuthConsentPage() {
       </main>
     );
 
-  if (!pendingConsent.clientId)
-    return (
-      <div className="app-shell">
-        <header className="topbar">
-          <Logo />
-          <Link to="/projects" search={{}} className="button button-ghost">
-            <ArrowLeft size={16} /> Projects
-          </Link>
-        </header>
-        <main className="account-card">
-          <h1>Account settings</h1>
-          <p className="field-error" role="alert">
-            This agent connection request is missing its client id. Close this tab and start the
-            connection again from your agent.
-          </p>
-        </main>
-      </div>
-    );
-
   return (
-    <div className="app-shell">
-      <header className="topbar">
-        <Logo />
-        <Link to="/projects" search={{}} className="button button-ghost">
-          <ArrowLeft size={16} /> Projects
-        </Link>
+    <main className="workshop-auth workshop-consent">
+      <header className="running-head">
+        <span>
+          <a href="/" className="sc">
+            Mind Palace
+          </a>
+          <span> · LaTeX Workshop</span>
+        </span>
+        <i>Private instance</i>
       </header>
-      <main className="account-card">
-        <h1>Account settings</h1>
-        <AccountSettingsContent pendingConsent={pendingConsent} />
-      </main>
-    </div>
+      <Link to="/projects" search={{}} className="crumb">
+        Projects
+      </Link>
+      <section className="workshop-consent-body">
+        <h1 className="display">Agent access</h1>
+        {!pendingConsent.clientId ? (
+          <p className="field-error" role="alert">
+            This connection request is missing its client id. Start the connection again from your
+            agent.
+          </p>
+        ) : (
+          <AccountSettingsContent pendingConsent={pendingConsent} />
+        )}
+      </section>
+    </main>
   );
 }

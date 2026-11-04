@@ -21,8 +21,7 @@ test('OAuth MCP agent creates a durable proposal that the owner reviews and acce
   const email = `agent-e2e-${Date.now()}@example.test`;
   const projectName = `Agent review ${Date.now()}`;
 
-  await page.goto('auth');
-  await page.getByRole('tab', { name: 'Create account' }).click();
+  await page.goto('auth?signup=true');
   await page.getByLabel('Name').fill('Agent Review User');
   await page.getByLabel('Email').fill(email);
   await page.getByLabel('Password', { exact: true }).fill('correct-horse-battery-staple');
@@ -35,8 +34,8 @@ test('OAuth MCP agent creates a durable proposal that the owner reviews and acce
   await page.getByLabel('Password').fill('correct-horse-battery-staple');
   await page.getByRole('button', { name: 'Sign in' }).click();
 
-  await page.getByRole('button', { name: 'New', exact: true }).click();
-  await page.getByRole('menuitem', { name: 'New Blank Project' }).click();
+  await page.getByRole('button', { name: 'New project', exact: true }).click();
+  await page.getByRole('menuitem', { name: 'Blank project' }).click();
   await page.getByLabel('Project name').fill(projectName);
   await page.getByRole('button', { name: 'Create project' }).click();
   await expect(page).toHaveTitle(`${projectName} - Latex Workshop`);

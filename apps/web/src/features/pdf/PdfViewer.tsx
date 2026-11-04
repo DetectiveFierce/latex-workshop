@@ -7,12 +7,13 @@ import {
   Download,
   Expand,
   ExternalLink,
-  FileSearch,
-  LayoutList,
   ListTree,
   PanelLeft,
   Printer,
-  Scan,
+  MoreHorizontal,
+  Crosshair,
+  Check,
+  X,
   Search,
   ZoomIn,
   ZoomOut,
@@ -27,8 +28,10 @@ import {
   ScrollMode,
 } from 'pdfjs-dist/web/pdf_viewer.mjs';
 import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
-import 'pdfjs-dist/web/pdf_viewer.css';
-import { IconButton } from '../../components/Button';
+import './pdf-viewer-layer.css';
+import { IconButton } from '@latex-workshop/ui';
+import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
+import '../../styles/workshop-panels.css';
 import {
   clientPointToSync,
   pdfSelectionLocation,
@@ -94,6 +97,12 @@ export function PdfViewer({
   const [page, setPage] = useState(1);
   const [scale, setScale] = useState(1);
   const [query, setQuery] = useState('');
+  const [findOpen, setFindOpen] = useState(false);
+  const findInputRef = useRef<HTMLInputElement>(null);
+  const findTriggerRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (findOpen) findInputRef.current?.focus();
+  }, [findOpen]);
   const [continuous, setContinuous] = useState(true);
   const [error, setError] = useState('');
   const [findState, setFindState] = useState<'idle' | 'pending' | 'found' | 'not-found'>('idle');
@@ -325,13 +334,21 @@ export function PdfViewer({
     const viewer = instanceRef.current;
     if (viewer) viewer.currentPageNumber = Math.min(pages, Math.max(1, next));
   };
-  const cycleFit = () => {
+  const fit = (mode: string) => {
     const viewer = instanceRef.current;
-    if (!viewer) return;
-    const current = viewer.currentScaleValue;
-    viewer.currentScaleValue =
-      current === 'page-width' ? 'page-fit' : current === 'page-fit' ? 'auto' : 'page-width';
-    setScale(viewer.currentScale);
+    if (viewer) {
+      viewer.currentScaleValue = mode;
+      setScale(viewer.currentScale);
+    }
+  };
+  const setZoom = (value: number) => {
+    const viewer = instanceRef.current;
+    if (viewer && Number.isFinite(value)) viewer.currentScale = Math.min(4, Math.max(0.25, value));
+  };
+  const closeFind = () => {
+    setFindOpen(false);
+    setQuery('');
+    findTriggerRef.current?.focus();
   };
   const find = (previous = false, type = 'again') => {
     if (!query) {
@@ -368,16 +385,16 @@ export function PdfViewer({
 
   return (
     <div className="pdf-viewer-shell">
-      <div className="preview-toolbar">
-        <IconButton
-          label={sidebar ? 'Hide PDF sidebar' : 'Show PDF thumbnails'}
-          onClick={() => setSidebar((current) => (current ? null : 'thumbnails'))}
-        >
-          <PanelLeft size={16} />
-        </IconButton>
+      <div className="preview-toolbar" role="toolbar" aria-label="PDF tools">
         <div className="pdf-page-controls">
-          <IconButton label="Previous page" disabled={page <= 1} onClick={() => goToPage(page - 1)}>
-            <ChevronLeft size={16} />
+          <IconButton
+            className="tb-sm"
+            compact
+            label="Previous page"
+            disabled={page <= 1}
+            onClick={() => goToPage(page - 1)}
+          >
+            <ChevronLeft size={15} />
           </IconButton>
           <label className="pdf-page-input">
             <span className="sr-only">Page number</span>
@@ -389,127 +406,324 @@ export function PdfViewer({
               onChange={(event) => goToPage(Number(event.target.value))}
             />
           </label>
-          <span className="badge pdf-page-total" aria-label={`of ${pages || 0} pages`}>
-            {'/' + String.fromCharCode(0xa0) + (pages || '\u2014')}
-          </span>
-          <IconButton label="Next page" disabled={page >= pages} onClick={() => goToPage(page + 1)}>
-            <ChevronRight size={16} />
+          <span className="pdf-page-total">/ {pages || '—'}</span>
+          <IconButton
+            className="tb-sm"
+            compact
+            label="Next page"
+            disabled={page >= pages}
+            onClick={() => goToPage(page + 1)}
+          >
+            <ChevronRight size={15} />
           </IconButton>
         </div>
-        <IconButton label="Zoom out" onClick={() => zoom(0.85)}>
-          <ZoomOut size={16} />
-        </IconButton>
-        <span className="badge pdf-zoom-level">{Math.round(scale * 100)}%</span>
-        <IconButton label="Zoom in" onClick={() => zoom(1.15)}>
-          <ZoomIn size={16} />
-        </IconButton>
-        <IconButton label="Cycle page fit mode" onClick={cycleFit}>
-          <Expand size={16} />
-        </IconButton>
-        <IconButton label={continuous ? 'Single page' : 'Continuous pages'} onClick={toggleMode}>
-          {continuous ? <Scan size={16} /> : <LayoutList size={16} />}
-        </IconButton>
+        <div className="pdf-zoom-controls">
+          <IconButton className="tb-sm" compact label="Zoom out" onClick={() => zoom(0.85)}>
+            <ZoomOut size={15} />
+          </IconButton>
+          <div className="pdf-zoom-field">
+            <input
+              aria-label="PDF zoom percentage"
+              key={Math.round(scale * 100)}
+              defaultValue={`${Math.round(scale * 100)}%`}
+              onBlur={(event) => setZoom(Number.parseFloat(event.target.value) / 100)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') {
+                  setZoom(Number.parseFloat(event.currentTarget.value) / 100);
+                  event.currentTarget.blur();
+                }
+              }}
+            />
+            <DropdownMenu.Root>
+              <DropdownMenu.Trigger asChild>
+                <button type="button" aria-label="Zoom and layout" title="Zoom and layout">
+                  <ChevronDown size={12} />
+                </button>
+              </DropdownMenu.Trigger>
+              <DropdownMenu.Portal>
+                <DropdownMenu.Content className="menu" align="center" sideOffset={6}>
+                  <DropdownMenu.Label className="mhead">Fit</DropdownMenu.Label>
+                  {[
+                    { label: 'Fit width', value: 'page-width' },
+                    { label: 'Fit page', value: 'page-fit' },
+                    { label: 'Actual size', value: '1' },
+                  ].map((item) => (
+                    <DropdownMenu.Item
+                      className="mi"
+                      key={item.value}
+                      onSelect={() => fit(item.value)}
+                    >
+                      <span className="pdf-menu-icon">
+                        {instanceRef.current?.currentScaleValue === item.value && (
+                          <Check size={14} />
+                        )}
+                      </span>
+                      {item.label}
+                    </DropdownMenu.Item>
+                  ))}
+                  <DropdownMenu.Separator className="msep" />
+                  <div className="pdf-menu-stepper">
+                    <IconButton
+                      className="tb-sm"
+                      compact
+                      label="Decrease PDF zoom"
+                      onClick={() => zoom(0.85)}
+                    >
+                      <ZoomOut size={14} />
+                    </IconButton>
+                    <span className="tnum">{Math.round(scale * 100)}%</span>
+                    <IconButton
+                      className="tb-sm"
+                      compact
+                      label="Increase PDF zoom"
+                      onClick={() => zoom(1.15)}
+                    >
+                      <ZoomIn size={14} />
+                    </IconButton>
+                  </div>
+                  <DropdownMenu.Separator className="msep" />
+                  <DropdownMenu.Label className="mhead">Zoom</DropdownMenu.Label>
+                  {[50, 75, 100, 125, 150, 200].map((value) => (
+                    <DropdownMenu.Item
+                      key={value}
+                      className="mi"
+                      onSelect={() => setZoom(value / 100)}
+                    >
+                      <span className="pdf-menu-icon">
+                        {Math.round(scale * 100) === value && <Check size={14} />}
+                      </span>
+                      {value}%
+                    </DropdownMenu.Item>
+                  ))}
+                  <DropdownMenu.Separator className="msep" />
+                  <DropdownMenu.Label className="mhead">Layout</DropdownMenu.Label>
+                  <DropdownMenu.Item
+                    className="mi"
+                    onSelect={() => {
+                      if (!continuous) toggleMode();
+                    }}
+                  >
+                    <span className="pdf-menu-icon">{continuous && <Check size={14} />}</span>
+                    Continuous
+                  </DropdownMenu.Item>
+                  <DropdownMenu.Item
+                    className="mi"
+                    onSelect={() => {
+                      if (continuous) toggleMode();
+                    }}
+                  >
+                    <span className="pdf-menu-icon">{!continuous && <Check size={14} />}</span>
+                    Single page
+                  </DropdownMenu.Item>
+                </DropdownMenu.Content>
+              </DropdownMenu.Portal>
+            </DropdownMenu.Root>
+          </div>
+          <IconButton className="tb-sm" compact label="Zoom in" onClick={() => zoom(1.15)}>
+            <ZoomIn size={15} />
+          </IconButton>
+        </div>
         <span className="spacer" />
-        <label className="searchbox">
-          <Search size={14} />
-          <input
-            className="input"
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter') {
-                event.preventDefault();
-                find(event.shiftKey);
-              }
-              if (event.key === 'Escape') setQuery('');
-            }}
-            placeholder="Find"
-          />
-        </label>
-        <IconButton label="Previous PDF match" disabled={!query} onClick={() => find(true)}>
-          <ChevronUp size={16} />
-        </IconButton>
-        <IconButton label="Next PDF match" disabled={!query} onClick={() => find(false)}>
-          <ChevronDown size={16} />
-        </IconButton>
-        {query && (
-          <span className="badge pdf-find-count" role="status">
-            {findState === 'pending'
-              ? '…'
-              : findState === 'not-found'
-                ? 'No matches'
-                : findCount.total
-                  ? `${findCount.current}/${findCount.total}`
-                  : '—'}
-          </span>
-        )}
-        <IconButton label="Find in PDF" onClick={() => find(false, '')}>
-          <FileSearch size={16} />
-        </IconButton>
-        <IconButton
-          label="Print"
+        <button
+          className="tb tb-sm"
+          ref={findTriggerRef}
+          type="button"
+          aria-label="Find in PDF"
+          title="Find in PDF"
+          aria-pressed={findOpen}
           onClick={() => {
-            const frame = document.createElement('iframe');
-            frame.style.display = 'none';
-            frame.src = url;
-            frame.onload = () => frame.contentWindow?.print();
-            document.body.append(frame);
-            setTimeout(() => frame.remove(), 60_000);
+            if (findOpen) closeFind();
+            else setFindOpen(true);
           }}
         >
-          <Printer size={16} />
-        </IconButton>
-        <a
-          className="icon-button"
-          href={
-            downloadUrl && downloadFilename
-              ? `${downloadUrl}?filename=${encodeURIComponent(downloadFilename)}`
-              : (downloadUrl ?? url)
-          }
-          download={downloadFilename ?? true}
-          aria-label="Download PDF"
-          title="Download PDF"
-        >
-          <Download size={16} />
-        </a>
-        {openUrl && (
-          <a
-            className="icon-button"
-            href={openUrl}
-            target="_blank"
-            rel="noreferrer"
-            aria-label="Open PDF in new tab"
-            title="Open PDF in new tab"
-            onClick={onOpenExternal}
-            onAuxClick={onOpenExternal}
-          >
-            <ExternalLink size={16} />
-          </a>
-        )}
+          <Search size={15} />
+        </button>
         <IconButton
-          label="Fullscreen"
-          onClick={() => void containerRef.current?.requestFullscreen()}
+          className="tb-sm"
+          compact
+          label="Locate source"
+          disabled={!onInverse}
+          onClick={() => {
+            const view = instanceRef.current?.getPageView(page - 1);
+            if (view && onInverse) {
+              const rect = view.div.getBoundingClientRect();
+              const point = clientPointToSync(
+                page,
+                rect.left + rect.width / 2,
+                rect.top + rect.height / 2,
+                view,
+              );
+              if (point) onInverse(point);
+            }
+          }}
         >
-          <Expand size={16} />
+          <Crosshair size={15} />
         </IconButton>
-        {onCollapse && (
-          <IconButton className="preview-collapse" label="Hide PDF preview" onClick={onCollapse}>
-            <ChevronRight size={16} />
-          </IconButton>
-        )}
+        <DropdownMenu.Root>
+          <DropdownMenu.Trigger asChild>
+            <button
+              type="button"
+              className="tb tb-sm"
+              aria-label="More PDF options"
+              title="More PDF options"
+            >
+              <MoreHorizontal size={16} />
+            </button>
+          </DropdownMenu.Trigger>
+          <DropdownMenu.Portal>
+            <DropdownMenu.Content className="menu" align="end" sideOffset={6}>
+              <DropdownMenu.Item
+                className="mi"
+                onSelect={() =>
+                  setSidebar((value) => (value === 'thumbnails' ? null : 'thumbnails'))
+                }
+              >
+                <PanelLeft size={15} />
+                Page thumbnails
+              </DropdownMenu.Item>
+              <DropdownMenu.Item
+                className="mi"
+                onSelect={() => setSidebar((value) => (value === 'outline' ? null : 'outline'))}
+              >
+                <ListTree size={15} />
+                Document outline
+              </DropdownMenu.Item>
+              <DropdownMenu.Separator className="msep" />
+              <DropdownMenu.Item
+                className="mi"
+                onSelect={() => {
+                  const frame = document.createElement('iframe');
+                  frame.style.display = 'none';
+                  frame.src = url;
+                  frame.onload = () => frame.contentWindow?.print();
+                  document.body.append(frame);
+                  setTimeout(() => frame.remove(), 60000);
+                }}
+              >
+                <Printer size={15} />
+                Print
+              </DropdownMenu.Item>
+              <DropdownMenu.Item className="mi" asChild>
+                <a
+                  href={
+                    downloadUrl && downloadFilename
+                      ? `${downloadUrl}?filename=${encodeURIComponent(downloadFilename)}`
+                      : (downloadUrl ?? url)
+                  }
+                  download={downloadFilename ?? true}
+                >
+                  <Download size={15} />
+                  Download PDF
+                </a>
+              </DropdownMenu.Item>
+              <DropdownMenu.Item className="mi" asChild>
+                <a
+                  href={openUrl ?? url}
+                  target="_blank"
+                  rel="noreferrer"
+                  onClick={onOpenExternal}
+                  onAuxClick={onOpenExternal}
+                >
+                  <ExternalLink size={15} />
+                  Open in new tab
+                </a>
+              </DropdownMenu.Item>
+              <DropdownMenu.Item
+                className="mi"
+                onSelect={() => void containerRef.current?.requestFullscreen()}
+              >
+                <Expand size={15} />
+                Full screen
+              </DropdownMenu.Item>
+              {onCollapse && (
+                <>
+                  <DropdownMenu.Separator className="msep" />
+                  <DropdownMenu.Item className="mi" onSelect={onCollapse}>
+                    <ChevronRight size={15} />
+                    Hide preview
+                  </DropdownMenu.Item>
+                </>
+              )}
+            </DropdownMenu.Content>
+          </DropdownMenu.Portal>
+        </DropdownMenu.Root>
       </div>
       <div className={`pdf-stage ${sidebar ? 'sidebar-open' : ''}`}>
+        {findOpen && (
+          <div
+            className="menu pdf-find-bar"
+            role="search"
+            onKeyDown={(event) => {
+              if (event.key === 'Escape') {
+                event.stopPropagation();
+                closeFind();
+              }
+            }}
+          >
+            <Search size={14} />
+            <input
+              ref={findInputRef}
+              value={query}
+              aria-label="Find in PDF"
+              placeholder="Find in PDF"
+              onChange={(event) => setQuery(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') {
+                  event.preventDefault();
+                  find(event.shiftKey);
+                }
+                if (event.key === 'Escape') {
+                  event.stopPropagation();
+                  closeFind();
+                }
+              }}
+            />
+            <span className="pdf-find-count" role="status">
+              {findState === 'pending'
+                ? '…'
+                : findState === 'not-found'
+                  ? 'No matches'
+                  : findCount.total
+                    ? `${findCount.current} of ${findCount.total}`
+                    : '0 of 0'}
+            </span>
+            <IconButton
+              className="tb-sm"
+              compact
+              label="Previous PDF match"
+              disabled={!query}
+              onClick={() => find(true)}
+            >
+              <ChevronUp size={14} />
+            </IconButton>
+            <IconButton
+              className="tb-sm"
+              compact
+              label="Next PDF match"
+              disabled={!query}
+              onClick={() => find(false)}
+            >
+              <ChevronDown size={14} />
+            </IconButton>
+            <IconButton className="tb-sm" compact label="Close PDF find" onClick={closeFind}>
+              <X size={14} />
+            </IconButton>
+          </div>
+        )}
+
         {sidebar && (
           <aside className="pdf-sidebar" aria-label="PDF navigation">
             <div className="pdf-sidebar-tabs">
               <button
-                className={sidebar === 'thumbnails' ? 'active' : ''}
+                className="ptab"
+                aria-selected={sidebar === 'thumbnails'}
                 onClick={() => setSidebar('thumbnails')}
               >
                 <PanelLeft size={14} /> Pages
               </button>
               <button
-                className={sidebar === 'outline' ? 'active' : ''}
+                className="ptab"
+                aria-selected={sidebar === 'outline'}
                 onClick={() => setSidebar('outline')}
               >
                 <ListTree size={14} /> Outline
@@ -606,7 +820,9 @@ function PdfThumbnail({
       onClick={() => onSelect(pageNumber)}
       aria-label={`Go to page ${pageNumber}`}
     >
-      <canvas ref={canvasRef} />
+      <span className="pdf-thumbnail-paper">
+        <canvas ref={canvasRef} />
+      </span>
       <span>{pageNumber}</span>
     </button>
   );

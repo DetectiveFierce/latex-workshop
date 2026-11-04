@@ -16,8 +16,7 @@ test('verified user creates, edits, persists, and compiles a project', async ({
   const password = 'correct-horse-battery-staple';
   const projectName = `Acceptance ${Date.now()}`;
 
-  await page.goto('auth');
-  await page.getByRole('tab', { name: 'Create account' }).click();
+  await page.goto('auth?signup=true');
   await page.getByLabel('Name').fill('Acceptance User');
   await page.getByLabel('Email').fill(email);
   await page.getByLabel('Password', { exact: true }).fill(password);
@@ -33,7 +32,7 @@ test('verified user creates, edits, persists, and compiles a project', async ({
   await page.getByLabel('Email').fill(email);
   await page.getByLabel('Password').fill(password);
   await page.getByRole('button', { name: 'Sign in' }).click();
-  await expect(page.getByRole('heading', { name: 'Library' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'All projects' })).toBeVisible();
 
   const accessibility = await new AxeBuilder({ page }).analyze();
   expect(
@@ -42,15 +41,18 @@ test('verified user creates, edits, persists, and compiles a project', async ({
     ),
   ).toEqual([]);
 
-  await page.getByRole('button', { name: 'New', exact: true }).click();
-  await expect(page.getByRole('menuitem', { name: 'New Project from Template' })).toBeVisible();
-  await expect(page.getByRole('menuitem', { name: 'New Directory' })).toBeVisible();
-  await page.getByRole('menuitem', { name: 'New Blank Project' }).click();
+  await page
+    .getByRole('button', { name: 'New project', exact: true })
+    .and(page.locator('[aria-haspopup="menu"]'))
+    .click();
+  await expect(page.getByRole('menuitem', { name: 'From template' })).toBeVisible();
+  await expect(page.getByRole('menuitem', { name: 'New folder' })).toBeVisible();
+  await page.getByRole('menuitem', { name: 'Blank project' }).click();
   await page.getByLabel('Project name').fill(projectName);
   await page.getByRole('button', { name: 'Create project' }).click();
   await expect(page.getByText(projectName)).toBeVisible();
   await expect(page).toHaveTitle(`${projectName} - Latex Workshop`);
-  await expect(page.getByText('TexLab ready')).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByTitle('TexLab ready')).toBeVisible({ timeout: 30_000 });
 
   const titleButton = page.getByRole('button', {
     name: `Rename project ${projectName}`,
@@ -70,7 +72,7 @@ test('verified user creates, edits, persists, and compiles a project', async ({
   await expect(titleButton).toBeVisible();
   await titleButton.dblclick();
   await titleInput.fill('Cancelled by clicking elsewhere');
-  await page.locator('.panel-header').first().click();
+  await page.getByRole('tab', { name: 'files' }).click();
   await expect(titleInput).toHaveCount(0);
   await expect(titleButton).toBeVisible();
   expect(titleWrites).toBe(0);
@@ -90,10 +92,10 @@ test('verified user creates, edits, persists, and compiles a project', async ({
   await titleInput.press('Enter');
   await expect(page).toHaveTitle(`${projectName} - Latex Workshop`);
 
-  await page.getByLabel('Project settings').click();
-  await expect(page.getByRole('dialog', { name: 'Project settings' })).toBeVisible();
-  await page.getByRole('button', { name: 'Open profile' }).click();
-  const accountSettings = page.getByRole('dialog', { name: 'Account settings' });
+  await page.getByLabel('Settings', { exact: true }).click();
+  await expect(page.getByRole('dialog', { name: 'Project', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Keyboard shortcuts', exact: true }).click();
+  const accountSettings = page.getByRole('dialog', { name: 'Keyboard shortcuts', exact: true });
   await expect(accountSettings).toBeVisible();
   await expect(page).toHaveTitle(`${projectName} - Latex Workshop`);
   const paletteShortcut = page.locator('.shortcut-row').filter({ hasText: 'Open command palette' });
@@ -106,9 +108,9 @@ test('verified user creates, edits, persists, and compiles a project', async ({
   await assignShortcut.click();
   await expect(page.getByText('Conflicts with Compile project.')).toBeVisible();
   await page.getByRole('button', { name: 'Replace' }).click();
-  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await page.getByRole('button', { name: 'Save shortcuts', exact: true }).click();
   await expect(page.getByText('Keyboard shortcuts saved.')).toBeVisible();
-  await accountSettings.getByRole('button', { name: 'Close' }).click();
+  await accountSettings.getByRole('button', { name: 'Close settings' }).click();
   await expect(page).toHaveTitle(`${projectName} - Latex Workshop`);
   await page.keyboard.press('Control+Enter');
   await expect(page.getByRole('dialog', { name: 'Command palette' })).toBeVisible();
@@ -120,13 +122,13 @@ test('verified user creates, edits, persists, and compiles a project', async ({
   await expect(page.locator('.monaco-editor')).toBeVisible();
   await page.keyboard.press('Control+Enter');
   await expect(page.getByRole('dialog', { name: 'Command palette' })).toBeVisible();
-  await page.getByPlaceholder('Type a command or file name…').fill('Open keyboard shortcuts');
+  await page.getByPlaceholder('Search or run a command').fill('Open keyboard shortcuts');
   await page.keyboard.press('Enter');
   await expect(accountSettings).toBeVisible();
   await page.getByRole('button', { name: 'Reset all' }).click();
-  const saveResetShortcuts = page.getByRole('button', { name: 'Save', exact: true });
+  const saveResetShortcuts = page.getByRole('button', { name: 'Save shortcuts', exact: true });
   if (await saveResetShortcuts.isEnabled()) await saveResetShortcuts.click();
-  await accountSettings.getByRole('button', { name: 'Close' }).click();
+  await accountSettings.getByRole('button', { name: 'Close settings' }).click();
   await expect(page).toHaveTitle(`${projectName} - Latex Workshop`);
   await expect(page.locator('.monaco-editor')).toBeVisible();
   await page.keyboard.press('Control+K');
@@ -283,8 +285,11 @@ test('verified user creates, edits, persists, and compiles a project', async ({
 
   await editor.click();
   await page.keyboard.press('Control+Enter');
-  await expect(page.getByLabel('Download PDF')).toBeVisible({ timeout: 120_000 });
-  await expect(page.getByLabel('Open PDF in new tab')).toBeVisible();
+  await expect(page.locator('.pdfViewer .page').first()).toBeVisible({ timeout: 45_000 });
+  await page.getByLabel('More PDF options').click();
+  await expect(page.getByRole('menuitem', { name: 'Download PDF', exact: true })).toBeVisible();
+  await expect(page.getByRole('menuitem', { name: 'Open in new tab', exact: true })).toBeVisible();
+  await page.keyboard.press('Escape');
 
   const pdfLayerMetrics = await page
     .locator('.pdfViewer .page')
@@ -306,13 +311,14 @@ test('verified user creates, edits, persists, and compiles a project', async ({
   if (!pdfLayerMetrics) throw new Error('PDF canvas or annotation layer did not render');
   for (const delta of Object.values(pdfLayerMetrics)) expect(Math.abs(delta)).toBeLessThan(1);
 
-  const pdfFind = page.locator('.preview-toolbar').getByPlaceholder('Find');
+  await page.getByLabel('Find in PDF', { exact: true }).click();
+  const pdfFind = page.locator('.pdf-find-bar').getByLabel('Find in PDF', { exact: true });
   await pdfFind.fill('Acceptance');
   await expect(page.locator('.pdf-find-count')).not.toHaveText('—');
   await page.getByLabel('Next PDF match').click();
   await page.getByLabel('Previous PDF match').click();
-  await pdfFind.fill('');
-  await expect(page.locator('.pdf-find-count')).toHaveCount(0);
+  await page.getByLabel('Close PDF find').click();
+  await expect(page.locator('.pdf-find-bar')).toHaveCount(0);
 
   const forwardResponse = page.waitForResponse(
     (response) => /\/synctex\/forward$/.test(response.url()) && response.ok(),
@@ -326,7 +332,9 @@ test('verified user creates, edits, persists, and compiles a project', async ({
     (response) => /\/synctex\/forward$/.test(response.url()) && response.ok(),
     { timeout: 30_000 },
   );
-  await page.getByLabel('Forward search').click();
+  await page.keyboard.press('Control+K');
+  await page.getByPlaceholder('Search or run a command').fill('Forward SyncTeX search');
+  await page.keyboard.press('Enter');
   await locateResponse;
   await expect(page.locator('.synctex-highlight')).toBeVisible();
 
@@ -340,17 +348,20 @@ test('verified user creates, edits, persists, and compiles a project', async ({
     (response) => /\/synctex\/forward$/.test(response.url()) && response.ok(),
     { timeout: 30_000 },
   );
-  await page.getByLabel('Forward search').click();
+  await page.keyboard.press('Control+K');
+  await page.getByPlaceholder('Search or run a command').fill('Forward SyncTeX search');
+  await page.keyboard.press('Enter');
   await staleLocate;
   await expect(page.getByText('Approximate match in an older PDF')).toBeVisible();
 
   const pdfPagePromise = page.context().waitForEvent('page');
-  await page.getByLabel('Open PDF in new tab').click();
+  await page.getByLabel('More PDF options').click();
+  await page.getByRole('menuitem', { name: 'Open in new tab', exact: true }).click();
   const pdfPage = await pdfPagePromise;
   await page.bringToFront();
   await expect(page.getByLabel('Show PDF preview')).toBeVisible();
   await page.getByLabel('Show PDF preview').press('Enter');
-  await expect(page.getByLabel('Hide PDF preview')).toBeVisible();
+  await expect(page.getByLabel('More PDF options')).toBeVisible();
   await expect(pdfPage).toHaveTitle(`PDF - ${projectName} - Latex Workshop`);
   await pdfPage.close();
 
@@ -378,8 +389,7 @@ test('library organizes projects with folders, tags, views, bulk actions, and re
   const email = `library-${Date.now()}-${Math.random().toString(36).slice(2)}@example.test`;
   const password = 'correct-horse-battery-staple';
 
-  await page.goto('auth');
-  await page.getByRole('tab', { name: 'Create account' }).click();
+  await page.goto('auth?signup=true');
   await page.getByLabel('Name').fill('Library User');
   await page.getByLabel('Email').fill(email);
   await page.getByLabel('Password', { exact: true }).fill(password);
@@ -390,7 +400,7 @@ test('library organizes projects with folders, tags, views, bulk actions, and re
   await page.getByLabel('Email').fill(email);
   await page.getByLabel('Password').fill(password);
   await page.getByRole('button', { name: 'Sign in' }).click();
-  await expect(page.getByRole('heading', { name: 'Library' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'All projects' })).toBeVisible();
 
   const openLibraryNavigation = async () => {
     await expect(page.getByRole('dialog')).toHaveCount(0);
@@ -400,7 +410,12 @@ test('library organizes projects with folders, tags, views, bulk actions, and re
   };
   const selectLibrarySection = async (name: string) => {
     await openLibraryNavigation();
-    await page.locator('.library-sidebar').getByRole('button', { name, exact: true }).click();
+    if (name === 'Trash') {
+      await page.getByRole('button', { name: 'Library settings' }).click();
+      await page.getByRole('menuitem', { name: 'Trash', exact: true }).click();
+    } else {
+      await page.locator('.library-sidebar').getByRole('button', { name, exact: true }).click();
+    }
   };
 
   await selectLibrarySection('Templates');
@@ -481,21 +496,25 @@ test('library organizes projects with folders, tags, views, bulk actions, and re
   await page.getByRole('button', { name: 'From Aidan actions' }).click();
   await page.getByRole('menuitem', { name: 'Remove from templates' }).click();
   await expect(page.getByText('From Aidan', { exact: true })).toHaveCount(0);
-  await selectLibrarySection('Library');
+  await selectLibrarySection('All projects');
   await expect(page.getByText('From Aidan', { exact: true })).toBeVisible();
 
-  await page.getByRole('button', { name: 'New', exact: true }).click();
-  await page.getByRole('menuitem', { name: 'New Directory' }).click();
+  await page
+    .getByRole('button', { name: 'New project', exact: true })
+    .and(page.locator('[aria-haspopup="menu"]'))
+    .click();
+  await page.getByRole('menuitem', { name: 'New folder' }).click();
   await page.getByLabel('Folder name').fill('Research');
   await page.getByRole('button', { name: 'Create folder' }).click();
-  await expect(
-    page.locator('.folder-tile').getByRole('button', { name: 'Research', exact: true }),
-  ).toBeVisible();
-  await page.locator('.folder-tile').getByRole('button', { name: 'Research', exact: true }).click();
+  await expect(page.locator('.folder-tree-link').filter({ hasText: 'Research' })).toBeVisible();
+  await page.locator('.folder-tree-link').filter({ hasText: 'Research' }).click();
   await expect(page.getByRole('heading', { name: 'Research' })).toBeVisible();
 
-  await page.getByRole('button', { name: 'New', exact: true }).click();
-  await page.getByRole('menuitem', { name: 'New Directory' }).click();
+  await page
+    .getByRole('button', { name: 'New project', exact: true })
+    .and(page.locator('[aria-haspopup="menu"]'))
+    .click();
+  await page.getByRole('menuitem', { name: 'New folder' }).click();
   await page.getByLabel('Folder name').fill('2026');
   await page.getByRole('button', { name: 'Create folder' }).click();
   await expect(
@@ -533,7 +552,7 @@ test('library organizes projects with folders, tags, views, bulk actions, and re
     await expect(draftTag).toBeChecked();
   }
   await page.getByRole('button', { name: 'Done' }).click();
-  await expect(page.locator('.library-project-card').getByText('Draft')).toBeVisible();
+  await expect(page.locator('.library-project-card').getByTitle('Draft')).toBeVisible();
 
   await page.getByRole('button', { name: 'List view' }).click();
   await expect(page.getByRole('button', { name: 'List view' })).toHaveAttribute(
@@ -541,6 +560,7 @@ test('library organizes projects with folders, tags, views, bulk actions, and re
     'true',
   );
   await expect(page.locator('.project-list')).toBeVisible();
+  await page.locator('.project-list-row').filter({ hasText: 'Folder Paper' }).hover();
   await page.getByRole('checkbox', { name: 'Select Folder Paper' }).check();
   await page
     .getByRole('toolbar', { name: 'Selected project actions' })
@@ -558,6 +578,7 @@ test('library organizes projects with folders, tags, views, bulk actions, and re
 
   await page.locator('.folder-tile').getByRole('button', { name: '2026', exact: true }).click();
   await expect(page.getByText('Folder Paper')).toBeVisible();
+  await page.locator('.project-list-row').filter({ hasText: 'Folder Paper' }).hover();
   await page.getByRole('checkbox', { name: 'Select Folder Paper' }).check();
   const favoriteResponse = page.waitForResponse(
     (response) =>
@@ -572,6 +593,7 @@ test('library organizes projects with folders, tags, views, bulk actions, and re
   await selectLibrarySection('Favorites');
   await expect(page.getByText('Folder Paper')).toBeVisible();
 
+  await page.locator('.project-list-row').filter({ hasText: 'Folder Paper' }).hover();
   await page.getByRole('checkbox', { name: 'Select Folder Paper' }).check();
   await page
     .getByRole('toolbar', { name: 'Selected project actions' })
@@ -584,7 +606,7 @@ test('library organizes projects with folders, tags, views, bulk actions, and re
   await page.getByRole('menuitem', { name: 'Restore' }).click();
   await expect(page.getByText('Folder Paper')).toHaveCount(0);
 
-  await selectLibrarySection('Library');
+  await selectLibrarySection('All projects');
   await page.getByRole('button', { name: 'Research folder actions' }).last().click();
   await page.getByRole('menuitem', { name: 'Move to trash' }).click();
   await page.getByRole('button', { name: 'Move to trash' }).click();
@@ -611,9 +633,8 @@ test('iPad desktop workspace edits, manages files, uploads, and compiles', async
   const password = 'correct-horse-battery-staple';
   const projectName = `iPad Acceptance ${Date.now()}`;
 
-  await page.goto('auth');
+  await page.goto('auth?signup=true');
   await expect(page.locator('html')).toHaveAttribute('data-layout', 'desktop');
-  await page.getByRole('tab', { name: 'Create account' }).tap();
   await page.getByLabel('Name').fill('iPad Acceptance User');
   await page.getByLabel('Email').fill(email);
   await page.getByLabel('Password', { exact: true }).fill(password);
@@ -628,13 +649,16 @@ test('iPad desktop workspace edits, manages files, uploads, and compiles', async
   await page.getByLabel('Email').fill(email);
   await page.getByLabel('Password').fill(password);
   await page.getByRole('button', { name: 'Sign in' }).tap();
-  await expect(page.getByRole('heading', { name: 'Library' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'All projects' })).toBeVisible();
 
-  await page.getByRole('button', { name: 'New', exact: true }).tap();
-  await page.getByRole('menuitem', { name: 'New Blank Project' }).tap();
+  await page
+    .getByRole('button', { name: 'New project', exact: true })
+    .and(page.locator('[aria-haspopup="menu"]'))
+    .tap();
+  await page.getByRole('menuitem', { name: 'Blank project' }).tap();
   await page.getByLabel('Project name').fill(projectName);
   await page.getByRole('button', { name: 'Create project' }).tap();
-  await expect(page.getByText('TexLab ready')).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByTitle('TexLab ready')).toBeVisible({ timeout: 30_000 });
   // iPad uses the multi-pane desktop workspace (Magic Keyboard / trackpad), not the phone switcher.
   await expect(page.locator('html')).toHaveAttribute('data-layout', 'desktop');
   await expect(page.getByRole('navigation', { name: 'Workspace panes' })).toHaveCount(0);
@@ -694,7 +718,7 @@ test('iPad desktop workspace edits, manages files, uploads, and compiles', async
   await expect(page.locator('html')).toHaveAttribute('data-layout', 'desktop');
 
   await page.locator('header').getByRole('button', { name: 'Compile', exact: true }).tap();
-  await expect(page.getByLabel('Download PDF')).toBeVisible({ timeout: 120_000 });
+  await expect(page.locator('.pdfViewer .page').first()).toBeVisible({ timeout: 45_000 });
   await expect(page.locator('.pdf-page-total')).toBeVisible();
   await expect(page.locator('.pdf-page-total')).toHaveCSS('white-space', 'nowrap');
   // Zoom in so the preview is larger than the scrollport and can pan on iPad.

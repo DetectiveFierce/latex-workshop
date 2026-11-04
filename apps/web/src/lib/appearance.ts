@@ -7,7 +7,7 @@ export type AppearancePreferences = {
 
 const STORAGE_KEY = 'appearance';
 const CHANGE_EVENT = 'appearance-change';
-const defaults: AppearancePreferences = { editorFontSize: 13, uiScale: 1 };
+const defaults: AppearancePreferences = { editorFontSize: 15, uiScale: 1 };
 
 export function readAppearance(): AppearancePreferences {
   try {

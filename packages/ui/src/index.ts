@@ -13,6 +13,11 @@ export const hateOfNature = {
   textBright: '#c5dca3',
   /** Secondary UI text; tuned for ≥4.5:1 on app chrome. */
   muted: '#7a9a4a',
+  selection: '#3a6bff40',
+  widgetShadow: '#00000099',
+  disabled: '#5a6e38',
+  focus: '#66d9ef',
+  paper: '#f3f1e8',
   green: '#a6e22e',
   cyan: '#66d9ef',
   blue: '#819aff',
@@ -21,3 +26,16 @@ export const hateOfNature = {
   magenta: '#ae81ff',
   red: '#f92672',
 } as const;
+
+export {
+  Button,
+  IconButton,
+  Field,
+  Switch,
+  Segmented,
+  Tabs,
+  NavRow,
+  TreeRow,
+  Menu,
+  Dialog,
+} from './components.js';

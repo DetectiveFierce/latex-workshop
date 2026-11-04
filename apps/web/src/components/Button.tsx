@@ -11,7 +11,21 @@ export function Button({
   variant?: 'default' | 'primary' | 'danger' | 'ghost';
 }) {
   return (
-    <button className={classNames('button', `button-${variant}`, className)} {...props}>
+    <button
+      className={classNames(
+        'btn',
+        variant === 'primary'
+          ? 'btn-p'
+          : variant === 'ghost'
+            ? 'btn-g'
+            : variant === 'danger'
+              ? 'btn-s btn-danger'
+              : 'btn-s',
+        'button',
+        className,
+      )}
+      {...props}
+    >
       {children}
     </button>
   );
@@ -25,7 +39,7 @@ export function IconButton({
 }: ButtonHTMLAttributes<HTMLButtonElement> & { label: string; children: ReactNode }) {
   return (
     <button
-      className={classNames('icon-button', className)}
+      className={classNames('ib', 'icon-button', className)}
       aria-label={label}
       title={label}
       {...props}

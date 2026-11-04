@@ -1,0 +1,108 @@
+/* Mind Palace redesign — design tokens.
+   The only file allowed to contain raw colour values.
+   Existing --hon-* names are kept so current Hub and Workshop CSS keeps working;
+   new names are added for the steps the old palette lacked. */
+:root {
+  color-scheme: dark;
+
+  /* Grounds, darkest to lightest */
+  --hon-terminal: #0d1303;      /* sidebars, side panels, page gutters */
+  --hon-inset: #111a04;         /* inputs, search, command field, grouped controls (new) */
+  --hon-app: #172304;           /* page background, row hover */
+  --hon-editor: #1a2d00;        /* editor body, active editor tab, menus, button hover */
+  --hon-card-hover: #1b3003;    /* card hover (new) */
+  --hon-weekend: #142003;       /* calendar weekend cells (new) */
+  --hon-surface: #293911;       /* selected rows, count badges, pressed toggles */
+  --hon-surface-hover: #2e4012;
+  --hon-active: #3a5412;        /* primary button fill */
+  --hon-active-hover: #456318;  /* new */
+  --hon-active-press: #34490f;  /* new */
+  --hon-active-border-hover: #5a7f22; /* new */
+  --hon-switch-on: #4d7a10;     /* new */
+  --hon-active-strong: #4a6b1a; /* menu and dialog border */
+
+  /* Rules */
+  --hon-border: #3d5614;
+  --hon-border-subtle: #3d561499; /* dividers inside a panel (new) */
+  --hon-border-faint: #3d561477;  /* table row rules (new) */
+  --hon-border-strong: #4d6d1c;   /* primary button border, active tab underline (new) */
+  --hon-border-hover: #55761f;    /* hover border on fields, cards, secondary buttons (new) */
+  --hon-guide: #4a5238;
+
+  /* Ink */
+  --hon-text: #92b161;
+  --hon-text-bright: #c5dca3;
+  --hon-text-strong: #e4f0cf;   /* selected / hovered items, button labels (new) */
+  --hon-text-max: #f1f8e4;      /* highlighted match text (new) */
+  --hon-muted: #7a9a4a;
+  --hon-disabled: #5a6e38;
+
+  /* Accents */
+  --hon-green: #a6e22e;
+  --hon-cyan: #66d9ef;
+  --hon-blue: #819aff;
+  --hon-yellow: #e6db74;
+  --hon-orange: #fd971f;
+  --hon-magenta: #ae81ff;
+  --hon-red: #f92672;
+  --hon-red-text: #ff7aa2;      /* destructive labels; #f92672 is 3.9:1 on menus */
+  --hon-paper: #f3f1e8;         /* rendered PDF pages and thumbnails only (new) */
+  --hon-focus: #66d9ef;
+  --hon-match-bg: #e6db7429;
+  --hon-match-ring: #e6db7450;
+
+  /* Course colours (BU Semester) */
+  --course-ma575: #66d9ef;
+  --course-ma581: #ae81ff;
+  --course-ma711: #fd971f;
+
+  /* Type */
+  --font-serif: 'TT Norms Pro Serif', Georgia, serif;
+  --font-slab: 'TT Rationalist', Rockwell, Georgia, serif;
+  --font-sans: 'Instrument Sans', system-ui, sans-serif;
+  --font-mono: 'Courier Prime', ui-monospace, monospace;
+
+  --hon-danger-dark: #5a1230; --hon-success-dark: #27400e;
+  --hon-selection: #3a6bff40; --hon-selection-strong: #3a6bff80;
+  --hon-widget-shadow: #00000099; --hon-white: #ffffff; --hon-black: #000000;
+  --radius: var(--r-md); --radius-lg: var(--r-dialog);
+  --shadow: var(--shadow-dialog); --ui-font-scale: 1;
+  /* Compatibility names and layout primitives */
+  --bg-terminal: var(--hon-terminal); --bg-inset: var(--hon-inset);
+  --bg-app: var(--hon-app); --bg-editor: var(--hon-editor);
+  --bg-surface: var(--hon-surface); --bg-active: var(--hon-active);
+  --bg-card-hover: var(--hon-card-hover); --border: var(--hon-border);
+  --border-subtle: var(--hon-border-subtle); --border-strong: var(--hon-border-strong);
+  --border-hover: var(--hon-border-hover); --border-menu: var(--hon-active-strong);
+  --text: var(--hon-text); --text-bright: var(--hon-text-bright);
+  --text-strong: var(--hon-text-strong); --text-max: var(--hon-text-max);
+  --text-muted: var(--hon-muted); --text-disabled: var(--hon-disabled); --focus: var(--hon-focus);
+  --space-1: 2px; --space-2: 4px; --space-3: 6px; --space-4: 8px;
+  --space-5: 10px; --space-6: 12px; --space-7: 14px; --space-8: 16px;
+  --space-12: 24px; --space-16: 32px;
+  --control-row: 24px; --control-compact: 30px; --control-toolbar: 32px;
+  --control-standard: 36px; --control-large: 40px;
+  --r-round: 50%; --r-chip: 15px; --r-key: 5px; --r-segment: 7px;
+  --r-dialog: 14px; --r-match: 2px;
+  --acc: var(--hon-green);
+
+  /* Shape */
+  --r-xs: 4px; --r-sm: 6px; --r-md: 8px; --r-lg: 10px; --r-xl: 12px; --r-pill: 9px;
+  --shadow-menu: inset 0 1px 0 #ffffff0d, 0 14px 36px #000000b3, 0 2px 6px #00000080;
+  --shadow-dialog: 0 1px 2px #00000080, 0 14px 36px #00000066;
+  --highlight-top: inset 0 1px 0 #ffffff14;
+}
+
+/* The maintainer guide deliberately retains its warm paper-and-ink palette. */
+[data-theme="folio"] {
+  color-scheme: dark;
+  --hon-terminal: #0c0805; --hon-app: #120c07; --hon-inset: #171009;
+  --hon-editor: #1d140c; --hon-surface: #2b2014; --hon-card-hover: #21180e;
+  --hon-text: #b8a58a; --hon-text-bright: #f0e6d4; --hon-text-strong: #e4d8c2;
+  --hon-text-max: #f0e6d4; --hon-muted: #8a7962; --hon-disabled: #73634e;
+  --hon-border: #4a3822; --hon-border-subtle: #4a382299;
+  --hon-border-strong: #70552e; --hon-border-hover: #a78043;
+  --hon-active: #4a3822; --hon-active-hover: #5a4428; --hon-active-strong: #70552e;
+  --folio-accent: #e8c06a; --folio-number: #f0c878; --folio-link: #dcb06a;
+  --acc: var(--folio-accent);
+}

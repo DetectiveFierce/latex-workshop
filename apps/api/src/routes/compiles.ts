@@ -7,6 +7,8 @@ import { and, desc, eq } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import {
   compileRequestSchema,
+  clearBuildCacheResponseSchema,
+  idSchema,
   forwardSyncRequestSchema,
   inverseSyncRequestSchema,
   type PdfSyncResult,
@@ -19,7 +21,7 @@ import { badRequest, notFound } from '../lib/errors.js';
 import { incrementMetric, observeMetric } from '../lib/operational-metrics.js';
 import { serializeCompile } from './projects.js';
 import { requestProjectCompilation } from '../lib/project-compiles.js';
-import { getSyncArtifact } from '../lib/synctex-artifacts.js';
+import { clearProjectSyncArtifacts, getSyncArtifact } from '../lib/synctex-artifacts.js';
 import { findInverseSource } from '../lib/inverse-search.js';
 import {
   alignSelectionToCompiled,
@@ -36,6 +38,21 @@ import {
 const exec = promisify(execFile);
 
 export async function registerCompileRoutes(app: FastifyInstance, context: AppContext) {
+  app.post('/api/v1/projects/:projectId/build-cache/clear', async (request) => {
+    const user = await requireUser(context, request);
+    const { projectId: rawId } = request.params as { projectId: unknown };
+    const parsedId = idSchema.safeParse(rawId);
+    if (!parsedId.success) throw badRequest('Invalid project ID');
+    const projectId = parsedId.data;
+    await requireProject(context.db, user.id, projectId);
+    // The isolated runner removes its TeX workspace and tmpfs cache after every job.
+    // Only the API's project-scoped SyncTeX metadata is retained and disposable.
+    return clearBuildCacheResponseSchema.parse({
+      ...clearProjectSyncArtifacts(context.storage, projectId),
+      compilationDirectories: 'ephemeral',
+    });
+  });
+
   app.post('/api/v1/projects/:projectId/compilations', async (request, reply) => {
     const user = await requireUser(context, request);
     const { projectId } = request.params as { projectId: string };

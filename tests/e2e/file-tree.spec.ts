@@ -5,8 +5,7 @@ import type { ProjectEntry } from '@latex-workshop/contracts';
 test('file tree context menus manage the clicked file or folder', async ({ page, request }) => {
   const email = `file-tree-${Date.now()}@example.test`;
   const password = 'correct-horse-battery-staple';
-  await page.goto('auth');
-  await page.getByRole('tab', { name: 'Create account' }).click();
+  await page.goto('auth?signup=true');
   await page.getByLabel('Name').fill('File Tree User');
   await page.getByLabel('Email').fill(email);
   await page.getByLabel('Password', { exact: true }).fill(password);
@@ -38,7 +37,7 @@ test('file tree context menus manage the clicked file or folder', async ({ page,
   await page.getByLabel('Email').fill(email);
   await page.getByLabel('Password', { exact: true }).fill(password);
   await page.getByRole('button', { name: 'Sign in' }).click();
-  await expect(page.getByRole('heading', { name: 'Library' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'All projects' })).toBeVisible();
 
   const created = await page.request.post('api/v1/projects', {
     data: { name: `Context menus ${Date.now()}` },
@@ -67,7 +66,7 @@ test('file tree context menus manage the clicked file or folder', async ({ page,
   await expect(menu).toHaveAccessibleName('Actions for intro.tex');
   await expect(row('intro.tex')).toHaveAttribute('aria-selected', 'true');
   await expect(item('New file')).toHaveCount(0);
-  for (const action of ['Rename', 'Duplicate', 'Move', 'Delete'])
+  for (const action of ['Rename', 'Duplicate', 'Move to…', 'Delete'])
     await expect(item(action)).toBeVisible();
   await page.keyboard.press('Escape');
   await expect(menu).toHaveCount(0);
@@ -91,7 +90,7 @@ test('file tree context menus manage the clicked file or folder', async ({ page,
   await item('Duplicate').click();
   await expect(row('opening copy.tex')).toBeVisible();
   await row('opening copy.tex').click({ button: 'right' });
-  await item('Move').click();
+  await item('Move to…').click();
   await page.getByLabel('Destination').selectOption('');
   await page.getByRole('dialog').getByRole('button', { name: 'Move', exact: true }).click();
   await expect(row('opening copy.tex')).toHaveAttribute('aria-level', '1');
@@ -111,7 +110,7 @@ test('file tree context menus manage the clicked file or folder', async ({ page,
   expect(dragMoves).toBe(1);
   page.off('request', countMove);
   await row('opening copy.tex').click({ button: 'right' });
-  await item('Move').click();
+  await item('Move to…').click();
   await page.getByLabel('Destination').selectOption('');
   await page.getByRole('dialog').getByRole('button', { name: 'Move', exact: true }).click();
   await expect(row('opening copy.tex')).toHaveAttribute('aria-level', '1');
@@ -126,7 +125,7 @@ test('file tree context menus manage the clicked file or folder', async ({ page,
   if (!bounds || !viewport) throw new Error('Menu bounds missing');
   expect(bounds.x).toBeGreaterThanOrEqual(0);
   expect(bounds.y + bounds.height).toBeLessThanOrEqual(viewport.height);
-  await page.locator('.panel-header > span').first().click();
+  await page.getByRole('tab', { name: 'files' }).click();
   await expect(menu).toHaveCount(0);
 
   await row('chapters').click();

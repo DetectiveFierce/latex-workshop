@@ -126,7 +126,7 @@ test('PDF text selection locates a late chapter with a duplicate filename', asyn
   expect(result.entryId).toBe(targetFile.id);
   expect(result.path).toBe('chapters/later/section.tex');
   expect(result.line).toBe(3_501);
-  await expect(page.locator('.editor-tab.active')).toContainText('section.tex');
+  await expect(page.locator('.etab[aria-selected="true"]')).toContainText('section.tex');
   await expect(page.locator('.view-lines')).toContainText(targetText);
   await expect(page.locator('.monaco-editor .selected-text').first()).toBeVisible();
 

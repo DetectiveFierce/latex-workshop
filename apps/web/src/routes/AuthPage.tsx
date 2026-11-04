@@ -1,11 +1,11 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { useNavigate } from '@tanstack/react-router';
-import { ArrowRight, MailCheck } from 'lucide-react';
+import { MailCheck } from 'lucide-react';
 import { Button } from '../components/Button';
-import { Logo } from '../components/Logo';
 import { authClient } from '../lib/auth';
 import { appPath } from '../lib/api';
 import { oauthAuthorizationQuery } from '../features/agent-proposals/oauthConsentQuery';
+import '../styles/auth.css';
 
 type Mode = 'signin' | 'signup' | 'forgot' | 'reset';
 
@@ -24,7 +24,9 @@ export function AuthPage() {
   const navigate = useNavigate();
   const { data: session, isPending } = authClient.useSession();
   const search = new URLSearchParams(window.location.search);
-  const [mode, setMode] = useState<Mode>(search.get('token') ? 'reset' : 'signin');
+  const [mode, setMode] = useState<Mode>(
+    search.get('token') ? 'reset' : search.get('signup') === 'true' ? 'signup' : 'signin',
+  );
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -114,56 +116,62 @@ export function AuthPage() {
   }
 
   return (
-    <main className="auth-layout">
-      <section className="auth-panel">
-        <Logo />
-        <div className="auth-card">
-          {mode !== 'forgot' && mode !== 'reset' && (
-            <div className="auth-tabs" role="tablist">
-              <button
-                role="tab"
-                aria-selected={mode === 'signin'}
-                onClick={() => setMode('signin')}
-              >
-                Sign in
-              </button>
-              <button
-                role="tab"
-                aria-selected={mode === 'signup'}
-                onClick={() => setMode('signup')}
-              >
-                Create account
-              </button>
-            </div>
-          )}
-          <h1>
+    <main className="workshop-auth">
+      <header className="running-head">
+        <span>
+          <a href="/" className="sc">
+            Mind Palace
+          </a>
+          <span> · LaTeX Workshop</span>
+        </span>
+        <i>Private instance</i>
+      </header>
+      <div className="workshop-auth-columns">
+        <section className="workshop-auth-intro">
+          <h1>LaTeX Workshop</h1>
+          <pre className="workshop-auth-code" aria-label="LaTeX document example">
+            <code>
+              <span className="syntax-command">{'\\documentclass'}</span>
+              {'{'}
+              <span className="syntax-type">article</span>
+              {'}'}
+              {'\n'}
+              <span className="syntax-command">{'\\begin'}</span>
+              {'{'}
+              <span className="syntax-type">document</span>
+              {'}'}
+              {'\n'}
+              <span className="syntax-comment"> % Your work here.</span>
+              {'\n'}
+              <span className="syntax-command">{'\\end'}</span>
+              {'{'}
+              <span className="syntax-type">document</span>
+              {'}'}
+            </code>
+          </pre>
+        </section>
+        <section className="workshop-auth-panel">
+          <h2>
             {mode === 'signin'
-              ? 'Welcome back.'
+              ? 'Sign in'
               : mode === 'signup'
-                ? 'Start writing.'
+                ? 'Create account'
                 : mode === 'forgot'
-                  ? 'Reset your password.'
-                  : 'Choose a new password.'}
-          </h1>
-          <p>
-            {mode === 'signin'
-              ? 'Your projects, compilation history, and PDFs are waiting.'
-              : mode === 'signup'
-                ? 'Create a private browser workspace for editing and compiling LaTeX.'
-                : 'We’ll email a link so you can choose a new password.'}
-          </p>
+                  ? 'Reset password'
+                  : 'New password'}
+          </h2>
           {message ? (
-            <div className="auth-message">
-              <MailCheck size={32} aria-hidden="true" />
+            <div className="workshop-auth-message" role="status">
+              <MailCheck size={24} aria-hidden="true" />
               <p>{message}</p>
             </div>
           ) : (
-            <form className="auth-form" onSubmit={submit}>
+            <form className="workshop-auth-form" onSubmit={submit}>
               {mode === 'signup' && (
-                <label className="field">
+                <label>
                   Name
                   <input
-                    className="input"
+                    className="fld fld-auth"
                     value={name}
                     onChange={(event) => setName(event.target.value)}
                     required
@@ -172,10 +180,10 @@ export function AuthPage() {
                 </label>
               )}
               {mode !== 'reset' && (
-                <label className="field">
+                <label>
                   Email
                   <input
-                    className="input"
+                    className="fld fld-auth"
                     type="email"
                     value={email}
                     onChange={(event) => setEmail(event.target.value)}
@@ -185,10 +193,10 @@ export function AuthPage() {
                 </label>
               )}
               {mode !== 'forgot' && (
-                <label className="field">
+                <label>
                   {mode === 'reset' ? 'New password' : 'Password'}
                   <input
-                    className="input"
+                    className="fld fld-auth"
                     type="password"
                     value={password}
                     onChange={(event) => setPassword(event.target.value)}
@@ -199,10 +207,10 @@ export function AuthPage() {
                 </label>
               )}
               {(mode === 'signup' || mode === 'reset') && (
-                <label className="field">
+                <label>
                   Confirm password
                   <input
-                    className="input"
+                    className="fld fld-auth"
                     type="password"
                     value={confirm}
                     onChange={(event) => setConfirm(event.target.value)}
@@ -217,73 +225,60 @@ export function AuthPage() {
                   {error}
                 </p>
               )}
-              <Button variant="primary" disabled={submitting}>
-                {submitting ? (
-                  'Please wait…'
-                ) : (
-                  <>
-                    {mode === 'signin'
-                      ? 'Sign in'
-                      : mode === 'signup'
-                        ? 'Create account'
-                        : mode === 'forgot'
-                          ? 'Send reset link'
-                          : 'Change password'}{' '}
-                    <ArrowRight size={16} />
-                  </>
-                )}
+              <Button variant="primary" type="submit" className="btn-lg" disabled={submitting}>
+                {submitting
+                  ? 'Signing in'
+                  : mode === 'signin'
+                    ? 'Sign in'
+                    : mode === 'signup'
+                      ? 'Create account'
+                      : mode === 'forgot'
+                        ? 'Send reset link'
+                        : 'Change password'}
               </Button>
             </form>
           )}
-          {mode === 'signin' && (
-            <button
-              className="button button-ghost"
-              onClick={() => {
-                setMode('forgot');
-                setMessage('');
-              }}
-            >
-              Forgot password?
-            </button>
-          )}
-          {(mode === 'forgot' || message) && (
-            <button
-              className="button button-ghost"
-              onClick={() => {
-                setMode('signin');
-                setMessage('');
-              }}
-            >
-              Back to sign in
-            </button>
-          )}
-        </div>
-        <small className="hint">Secure, isolated compilation · No shell escape</small>
-      </section>
-      <section className="auth-hero" aria-hidden="true">
-        <div className="tex-card">
-          <span className="kw">\documentclass</span>
-          {'{'}
-          <span className="str">article</span>
-          {'}'}
-          <br />
-          <span className="kw">\begin</span>
-          {'{'}
-          <span className="fn">document</span>
-          {'}'}
-          <br />
-          <br />
-          Ideas become documents here.
-          <br />
-          <span className="comment">% Fast feedback. Beautiful output.</span>
-          <br />
-          <br />
-          <span className="kw">\end</span>
-          {'{'}
-          <span className="fn">document</span>
-          {'}'}
-        </div>
-      </section>
+          <div className="workshop-auth-links">
+            {mode === 'signin' && (
+              <button
+                type="button"
+                onClick={() => {
+                  setMode('forgot');
+                  setMessage('');
+                  setError('');
+                }}
+              >
+                Reset password
+              </button>
+            )}
+            {mode === 'signin' &&
+              new URLSearchParams(window.location.search).get('signup') === 'true' && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMode('signup');
+                    setMessage('');
+                    setError('');
+                  }}
+                >
+                  Create account
+                </button>
+              )}
+            {mode !== 'signin' || message ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setMode('signin');
+                  setMessage('');
+                  setError('');
+                }}
+              >
+                Back to sign in
+              </button>
+            ) : null}
+          </div>
+        </section>
+      </div>
     </main>
   );
 }

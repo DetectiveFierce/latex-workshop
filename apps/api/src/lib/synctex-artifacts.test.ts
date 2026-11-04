@@ -46,4 +46,41 @@ describe('immutable SyncTeX artifact cache', () => {
     );
     await expect(cache.get('bad', async () => gzipSync('not SyncTeX'))).rejects.toThrow('preamble');
   });
+  it('clears one project while retaining other project artifacts', async () => {
+    const cache = new SyncArtifactCache();
+    const first = '00000000-0000-4000-8000-000000000001';
+    const other = '00000000-0000-4000-8000-000000000002';
+    const load = vi.fn(async () => artifact);
+    const key = (id: string) => `artifacts/${id}/job/document.synctex.gz`;
+    const a = await cache.get(key(first), load);
+    const b = await cache.get(key(other), load);
+    expect(cache.clearProject(first)).toEqual({ clearedEntries: 1, invalidatedInFlight: 0 });
+    expect(await cache.get(key(other), load)).toBe(b);
+    expect(await cache.get(key(first), load)).not.toBe(a);
+    expect(load).toHaveBeenCalledTimes(3);
+    expect(() => cache.clearProject('')).toThrow();
+  });
+
+  it('does not let in-flight reads repopulate a cleared project cache', async () => {
+    const cache = new SyncArtifactCache();
+    const id = '00000000-0000-4000-8000-000000000001';
+    let resolveLoad: (value: Buffer) => void = () => {
+      throw new Error('load not started');
+    };
+    const load = vi.fn(
+      () =>
+        new Promise<Buffer>((resolve) => {
+          resolveLoad = resolve;
+        }),
+    );
+    const key = `artifacts/${id}/job/document.synctex.gz`;
+    const read = cache.get(key, load);
+    expect(cache.clearProject(id)).toEqual({ clearedEntries: 0, invalidatedInFlight: 1 });
+    const concurrent = cache.get(key, load);
+    resolveLoad(artifact);
+    expect(await concurrent).toBe(await read);
+    const reload = vi.fn(async () => artifact);
+    await cache.get(key, reload);
+    expect(reload).toHaveBeenCalledTimes(1);
+  });
 });

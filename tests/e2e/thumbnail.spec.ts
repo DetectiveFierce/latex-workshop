@@ -7,8 +7,7 @@ test('Library creates missing thumbnails in the background with auto compile dis
   test.setTimeout(300_000);
   const email = `thumbnail-${Date.now()}@example.test`;
   const password = 'correct-horse-battery-staple';
-  await page.goto('auth');
-  await page.getByRole('tab', { name: 'Create account' }).click();
+  await page.goto('auth?signup=true');
   await page.getByLabel('Name').fill('Thumbnail User');
   await page.getByLabel('Email').fill(email);
   await page.getByLabel('Password', { exact: true }).fill(password);
@@ -38,7 +37,7 @@ test('Library creates missing thumbnails in the background with auto compile dis
   await page.getByLabel('Email').fill(email);
   await page.getByLabel('Password').fill(password);
   await page.getByRole('button', { name: 'Sign in' }).click();
-  await expect(page.getByRole('heading', { name: 'Library' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'All projects' })).toBeVisible();
   const name = `Background preview ${Date.now()}`;
   const response = await page.request.post('api/v1/projects', { data: { name } });
   expect(response.ok()).toBeTruthy();

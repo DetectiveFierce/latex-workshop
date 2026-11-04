@@ -76,7 +76,8 @@ test('PDF downloads use the current project name in the editor and PDF tab', asy
     .toBe('succeeded');
 
   await page.goto(`projects/${project.id}`);
-  const downloadLink = page.getByLabel('Download PDF', { exact: true });
+  await page.getByLabel('More PDF options').click();
+  const downloadLink = page.getByRole('menuitem', { name: 'Download PDF', exact: true });
   await expect(downloadLink).toBeVisible();
   const originalDownloadUrl = await downloadLink.getAttribute('href');
   const firstDownload = page.waitForEvent('download');
@@ -87,6 +88,7 @@ test('PDF downloads use the current project name in the editor and PDF tab', asy
   await page.getByRole('button', { name: `Rename project ${projectName}`, exact: true }).dblclick();
   await page.getByRole('textbox', { name: 'Project title', exact: true }).fill(renamedProjectName);
   await page.getByRole('textbox', { name: 'Project title', exact: true }).press('Enter');
+  await page.getByLabel('More PDF options').click();
   await expect(downloadLink).toHaveAttribute('download', `${renamedProjectName}.pdf`);
   const renamedDownloadUrl = await downloadLink.getAttribute('href');
   expect(renamedDownloadUrl).not.toBe(originalDownloadUrl);
@@ -103,6 +105,7 @@ test('PDF downloads use the current project name in the editor and PDF tab', asy
   );
 
   await page.goto(`projects/${project.id}/pdf/${job.id}`);
+  await page.getByLabel('More PDF options').click();
   await expect(downloadLink).toHaveAttribute('download', `${renamedProjectName}.pdf`);
   const pdfTabDownload = page.waitForEvent('download');
   await downloadLink.click();

@@ -15,8 +15,12 @@ export function ProjectThumbnail({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [visible, setVisible] = useState(false);
   const [loaded, setLoaded] = useState(false);
+  const [failed, setFailed] = useState(false);
 
-  useEffect(() => setLoaded(false), [jobId]);
+  useEffect(() => {
+    setLoaded(false);
+    setFailed(false);
+  }, [jobId]);
 
   useEffect(() => {
     if (jobId && generate > 0) setVisible(true);
@@ -43,6 +47,7 @@ export function ProjectThumbnail({
         import('pdfjs-dist'),
         import('pdfjs-dist/build/pdf.worker.min.mjs?url'),
       ]);
+      if (cancelled) return;
       pdfjs.GlobalWorkerOptions.workerSrc = worker.default;
       const loadingTask = pdfjs.getDocument({
         url: appPath(`/api/v1/projects/${projectId}/compilations/${jobId}/pdf`),
@@ -60,11 +65,22 @@ export function ProjectThumbnail({
       if (!context) return;
       canvas.width = Math.floor(viewport.width);
       canvas.height = Math.floor(viewport.height);
-      await page.render({ canvas, canvasContext: context, viewport }).promise;
+      await page.render({
+        canvas,
+        canvasContext: context,
+        viewport,
+        background: getComputedStyle(hostRef.current ?? canvas)
+          .getPropertyValue('--hon-paper')
+          .trim(),
+      }).promise;
       if (!cancelled) setLoaded(true);
       await document.cleanup();
-    })().catch(() => {
-      if (!cancelled) setLoaded(false);
+    })().catch((error: unknown) => {
+      if (!cancelled) {
+        console.warn('Could not render project preview', error);
+        setLoaded(false);
+        setFailed(true);
+      }
     });
     return () => {
       cancelled = true;
@@ -76,7 +92,13 @@ export function ProjectThumbnail({
     <div ref={hostRef} className={`project-thumbnail${loaded ? ' loaded' : ''}`}>
       <div className="project-thumbnail-placeholder">
         <FileCode2 size={32} />
-        <span>{jobId ? 'Loading preview…' : 'Preview pending'}</span>
+        <span>
+          {failed
+            ? 'Preview unavailable · refresh to retry'
+            : jobId
+              ? 'Loading preview…'
+              : 'Preview pending'}
+        </span>
       </div>
       {jobId && <canvas ref={canvasRef} aria-hidden="true" />}
     </div>

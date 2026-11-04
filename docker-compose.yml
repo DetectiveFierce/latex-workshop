@@ -112,6 +112,8 @@ services:
       api: { condition: service_started }
       language-service: { condition: service_started }
     ports: ['5173:80']
+    # Production serves /ui/v1 from the gateway; this stack has no gateway.
+    volumes: ['./tests/fixtures/ui:/usr/share/nginx/html/ui/v1:ro']
 
 volumes:
   postgres-data:

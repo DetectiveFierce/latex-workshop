@@ -21,6 +21,7 @@ import {
 import { syncProposalOverlay } from '../agent-proposals/proposalEditorDecorations';
 import { registerLatexLanguage, languageFor } from './latexLanguage';
 import { TexLabClient, type TexLabStatus } from './lspClient';
+import type { DocumentSymbolReader } from '../outline/SourceOutline';
 
 self.MonacoEnvironment = {
   getWorker: () => new MonacoEditorWorker(),
@@ -92,6 +93,7 @@ export function EditorPane({
   onRegisterFocus,
   onRegisterShortcutRunner,
   onRegisterViewport,
+  onRegisterDocumentSymbols,
   onSourceLocate,
   onSaveState,
   shortcuts,
@@ -136,6 +138,7 @@ export function EditorPane({
   onRegisterFocus?: (focus: () => void) => void;
   onRegisterShortcutRunner?: (run: (action: ShortcutActionId) => void) => void;
   onRegisterViewport?: (capture: () => EditorViewportSnapshot | null) => void;
+  onRegisterDocumentSymbols?: (read: DocumentSymbolReader) => void;
   onSourceLocate?: (selection: {
     start: { line: number; column: number };
     end: { line: number; column: number };
@@ -593,6 +596,8 @@ export function EditorPane({
     if (!lspRef.current) {
       lspRef.current = new TexLabClient(monaco, projectId, onLanguageStatus);
       lspRef.current.connect();
+      const client = lspRef.current;
+      onRegisterDocumentSymbols?.((path) => client.documentSymbols(path));
     }
     const model = editor.getModel();
     controllers.current.get(entry.id)!.selection = snapshotSelections(editor.getSelections());
@@ -602,6 +607,13 @@ export function EditorPane({
           lspRef.current?.open(model, proposalModelRef.current?.acceptedText ?? model.getValue()),
         500,
       );
+    editor.addAction({
+      id: 'latex-workshop.locate-source-in-pdf',
+      label: 'Locate in PDF',
+      contextMenuGroupId: 'navigation',
+      contextMenuOrder: 1,
+      run: () => onWorkspaceShortcutRef.current('workspace.forwardSearch'),
+    });
     editor.onDidPaste(() => window.setTimeout(() => void flush()));
     editor.onDidBlurEditorText(() => void flush());
     editor.onDidChangeCursorPosition(({ position, reason }) => {
@@ -767,18 +779,21 @@ export function EditorPane({
         keepCurrentModel
         options={{
           automaticLayout: true,
-          fontFamily: '"JetBrains Mono", "Fira Code", ui-monospace, monospace',
+          fontFamily: getComputedStyle(document.documentElement)
+            .getPropertyValue('--font-mono')
+            .trim(),
           fontSize,
-          lineHeight: Math.round(fontSize * 1.62),
-          minimap: { enabled: !touchLayout },
+          lineHeight: Math.round(fontSize * 1.69),
+          lineNumbersMinChars: 3,
+          minimap: { enabled: false },
           glyphMargin: true,
           wordWrap: 'on',
           tabSize: 2,
           insertSpaces: true,
           smoothScrolling: true,
           cursorSmoothCaretAnimation: 'on',
-          bracketPairColorization: { enabled: true },
-          guides: { bracketPairs: true, indentation: true },
+          bracketPairColorization: { enabled: false },
+          guides: { bracketPairs: false, indentation: true },
           stickyScroll: { enabled: !touchLayout },
           renderWhitespace: 'selection',
           scrollBeyondLastLine: false,

@@ -1,6 +1,6 @@
 import { useRef, type ReactNode } from 'react';
 import * as ContextMenu from '@radix-ui/react-context-menu';
-import { Copy, FilePlus2, FolderInput, FolderPlus, Pencil, Trash2 } from 'lucide-react';
+import { Copy, FilePlus2, FolderInput, FolderPlus, FileCheck, Pencil, Trash2 } from 'lucide-react';
 import type { ProjectEntry } from '@latex-workshop/contracts';
 
 export function EntryContextMenu({
@@ -12,6 +12,7 @@ export function EntryContextMenu({
   onDuplicate,
   onMove,
   onDelete,
+  onSetMain,
 }: {
   entry: ProjectEntry;
   children: ReactNode;
@@ -21,9 +22,11 @@ export function EntryContextMenu({
   onDuplicate: () => void;
   onMove: () => void;
   onDelete: () => void;
+  onSetMain?: (() => void) | undefined;
 }) {
-  const trigger = useRef<HTMLSpanElement>(null);
+  const trigger = useRef<HTMLDivElement>(null);
   const restoreFocus = useRef(false);
+  const focusTarget = useRef<HTMLElement | null>(null);
   return (
     <ContextMenu.Root
       modal={false}
@@ -37,6 +40,19 @@ export function EntryContextMenu({
       <ContextMenu.Trigger
         asChild
         ref={trigger}
+        onContextMenuCapture={(event) => {
+          const active = document.activeElement;
+          focusTarget.current =
+            event.target instanceof Element ? event.target.closest('button') : null;
+          if (
+            !focusTarget.current &&
+            active instanceof HTMLElement &&
+            trigger.current?.contains(active)
+          )
+            focusTarget.current = active;
+          focusTarget.current ??=
+            trigger.current?.querySelector<HTMLElement>('[role="treeitem"]') ?? null;
+        }}
         onKeyDown={(event) => {
           if (event.key !== 'ContextMenu' && !(event.shiftKey && event.key === 'F10')) return;
           event.preventDefault();
@@ -56,7 +72,7 @@ export function EntryContextMenu({
       </ContextMenu.Trigger>
       <ContextMenu.Portal>
         <ContextMenu.Content
-          className="dropdown file-context-menu"
+          className="menu file-context-menu"
           aria-label={`Actions for ${entry.name}`}
           collisionPadding={8}
           onEscapeKeyDown={() => {
@@ -65,32 +81,38 @@ export function EntryContextMenu({
           onCloseAutoFocus={(event) => {
             if (restoreFocus.current) {
               event.preventDefault();
-              trigger.current?.focus();
+              focusTarget.current?.focus();
             }
           }}
         >
           {entry.kind === 'folder' && (
             <>
-              <ContextMenu.Item className="dropdown-item" onSelect={() => onCreate('file')}>
+              <ContextMenu.Item className="mi" onSelect={() => onCreate('file')}>
                 <FilePlus2 size={15} /> New file
               </ContextMenu.Item>
-              <ContextMenu.Item className="dropdown-item" onSelect={() => onCreate('folder')}>
+              <ContextMenu.Item className="mi" onSelect={() => onCreate('folder')}>
                 <FolderPlus size={15} /> New folder
               </ContextMenu.Item>
-              <ContextMenu.Separator className="dropdown-separator" />
+              <ContextMenu.Separator className="msep" />
             </>
           )}
-          <ContextMenu.Item className="dropdown-item" onSelect={onRename}>
+          <ContextMenu.Item className="mi" onSelect={onRename}>
             <Pencil size={15} /> Rename
           </ContextMenu.Item>
-          <ContextMenu.Item className="dropdown-item" onSelect={onDuplicate}>
+          <ContextMenu.Item className="mi" onSelect={onDuplicate}>
             <Copy size={15} /> Duplicate
           </ContextMenu.Item>
-          <ContextMenu.Item className="dropdown-item" onSelect={onMove}>
-            <FolderInput size={15} /> Move
+          <ContextMenu.Item className="mi" onSelect={onMove}>
+            <FolderInput size={15} /> Move to…
           </ContextMenu.Item>
-          <ContextMenu.Separator className="dropdown-separator" />
-          <ContextMenu.Item className="dropdown-item dropdown-danger" onSelect={onDelete}>
+          {entry.kind === 'file' && entry.name.endsWith('.tex') && onSetMain && (
+            <ContextMenu.Item className="mi" onSelect={onSetMain}>
+              <FileCheck size={15} />
+              Set as main document
+            </ContextMenu.Item>
+          )}
+          <ContextMenu.Separator className="msep" />
+          <ContextMenu.Item className="mi mi-danger" onSelect={onDelete}>
             <Trash2 size={15} /> Delete
           </ContextMenu.Item>
         </ContextMenu.Content>

@@ -1,0 +1,2 @@
+/* PDF.js ships generic class names such as .dialog; the layer keeps shared styles ahead of them. */
+@import 'pdfjs-dist/web/pdf_viewer.css' layer(pdfjs);

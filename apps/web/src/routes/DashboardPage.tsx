@@ -20,7 +20,6 @@ import {
   Check,
   ChevronDown,
   ChevronRight,
-  Clock3,
   Copy,
   Download,
   FileCode2,
@@ -57,16 +56,15 @@ import type {
   TemplateListResponse,
   TemplateSummary,
 } from '@latex-workshop/contracts';
-import { AppearanceMenu } from '../components/AppearanceMenu';
 import { Button, IconButton } from '../components/Button';
 import { Dialog } from '../components/Dialog';
-import { Logo } from '../components/Logo';
 import { ProjectThumbnail } from '../components/ProjectThumbnail';
 import { Toast, type ToastState } from '../components/Toast';
 import { AccountSettingsDialog } from './AccountPage';
 import { api, appPath, queryKeys, uploadForm } from '../lib/api';
 import { authClient } from '../lib/auth';
 import { classNames, formatRelative } from '../lib/utils';
+import '../styles/library.css';
 
 type View = 'all' | 'recent' | 'favorites' | 'templates' | 'folder' | 'tag' | 'trash';
 type Sort = 'updated-desc' | 'updated-asc' | 'created-desc' | 'name-asc' | 'name-desc';
@@ -257,7 +255,7 @@ export function DashboardPage() {
     } else if (view === 'templates') {
       // The templates endpoint has already limited this collection to active templates.
     } else if (view === 'all') {
-      result = result.filter((project) => !project.folderId);
+      // All projects includes projects inside folders; the sidebar scopes individual folders.
     } else if (view === 'recent') {
       return result
         .filter(
@@ -297,7 +295,7 @@ export function DashboardPage() {
         (folderPath.get(folder.id) ?? folder.name).toLocaleLowerCase().includes(normalized),
       );
     }
-    if (view === 'all') return activeFolders.filter((folder) => !folder.parentId);
+    if (view === 'all') return [];
     if (view === 'folder')
       return activeFolders.filter((folder) => folder.parentId === currentFolder?.id);
     if (view === 'trash') {
@@ -650,7 +648,7 @@ export function DashboardPage() {
               ? 'Recent'
               : view === 'trash'
                 ? 'Trash'
-                : 'Library';
+                : 'All projects';
 
   return (
     <DndContext
@@ -664,58 +662,59 @@ export function DashboardPage() {
       onDragCancel={() => setDragLabel(null)}
     >
       <div className="library-shell">
-        <header className="app-header">
-          <IconButton
-            label="Open library navigation"
-            className="library-menu-button"
-            onClick={() => setSidebarOpen(true)}
-          >
-            <Menu size={18} />
-          </IconButton>
-          <Logo />
-          <div className="app-header-actions">
-            <AppearanceMenu />
-            <span className="hint">{session.user.email}</span>
-            <LibrarySettingsMenu
-              generating={thumbnailProgress}
-              projectCount={thumbnailProjects.length}
-              onGenerate={() => void generateAllThumbnails()}
-              onAccountSettings={() => setAccountSettingsOpen(true)}
-            />
-          </div>
-        </header>
-
         <aside className={classNames('library-sidebar', sidebarOpen && 'open')}>
-          <div className="library-sidebar-mobile-header">
-            <span>Library</span>
-            <IconButton label="Close navigation" onClick={() => setSidebarOpen(false)}>
+          <div className="library-brand">
+            <a href="/" className="library-home" aria-label="Mind Palace" title="Mind Palace">
+              <img src="/ui/v1/icons/latex-workshop.svg" alt="" width="28" height="28" />
+            </a>
+            <span>LaTeX Workshop</span>
+            <IconButton
+              label="Close navigation"
+              className="library-sidebar-close"
+              onClick={() => setSidebarOpen(false)}
+            >
               <X size={18} />
             </IconButton>
           </div>
-          <nav aria-label="Project library">
+          {!trash && (
+            <CreateMenu
+              importing={importing}
+              onBlankProject={() => setModal({ type: 'create-project', mode: 'blank' })}
+              onTemplateProject={() => setModal({ type: 'create-project', mode: 'template' })}
+              onFolder={() => setModal({ type: 'folder', parentId: currentFolder?.id ?? null })}
+              onImport={() => importRef.current?.click()}
+              onOverleaf={() => overleafImportRef.current?.click()}
+            />
+          )}
+          <nav aria-label="Project library" className="library-primary-nav">
+            <RootDropItem
+              active={view === 'all'}
+              count={data?.projects.length ?? 0}
+              onClick={() => openView('all')}
+            />
             <SidebarItem
-              icon={<Clock3 size={16} />}
               active={view === 'recent'}
               label="Recent"
+              count={data?.projects.filter((project) => project.lastOpenedAt).length ?? 0}
               onClick={() => openView('recent')}
             />
             <SidebarItem
-              icon={<Star size={16} />}
               active={view === 'favorites'}
               label="Favorites"
+              count={data?.projects.filter((project) => project.favorite).length ?? 0}
               onClick={() => openView('favorites')}
             />
             <SidebarItem
-              icon={<LayoutTemplate size={16} />}
               active={view === 'templates'}
               label="Templates"
+              count={templateProjects.length}
               onClick={() => openView('templates')}
             />
-            <RootDropItem active={view === 'all'} onClick={() => openView('all')} />
           </nav>
-          <div className="sidebar-section-heading">
+          <div className="sidebar-section-heading lbl">
             <span>Folders</span>
             <IconButton
+              className="ib-row"
               label="New folder"
               onClick={() => setModal({ type: 'folder', parentId: null })}
             >
@@ -730,6 +729,7 @@ export function DashboardPage() {
                   key={folder.id}
                   folder={folder}
                   folders={activeFolders}
+                  projects={data?.projects ?? []}
                   activeId={currentFolder?.id ?? null}
                   expanded={expanded}
                   onExpanded={setExpanded}
@@ -748,9 +748,13 @@ export function DashboardPage() {
               ))}
             {!activeFolders.length && <p className="sidebar-empty">No folders yet</p>}
           </div>
-          <div className="sidebar-section-heading">
+          <div className="sidebar-section-heading lbl">
             <span>Tags</span>
-            <IconButton label="New tag" onClick={() => setModal({ type: 'tag' })}>
+            <IconButton
+              className="ib-row"
+              label="New tag"
+              onClick={() => setModal({ type: 'tag' })}
+            >
               <Plus size={14} />
             </IconButton>
           </div>
@@ -760,9 +764,16 @@ export function DashboardPage() {
                 key={tag.id}
                 className={classNames('sidebar-tag-row', currentTag?.id === tag.id && 'active')}
               >
-                <button onClick={() => openView('tag', tag.id)}>
-                  <span className={`tag-dot tag-${tag.color}`} />
+                <button aria-label={tag.name} onClick={() => openView('tag', tag.id)}>
+                  <span className={`tag-dot tag-${tagTone(tag)}`} />
                   <span>{tag.name}</span>
+                  <span className="library-nav-count">
+                    {
+                      data.projects.filter((project) =>
+                        project.tags.some((item) => item.id === tag.id),
+                      ).length
+                    }
+                  </span>
                 </button>
                 <ItemMenu label={`${tag.name} tag actions`}>
                   <DropdownItem
@@ -798,14 +809,21 @@ export function DashboardPage() {
             ))}
             {!data?.tags.length && <p className="sidebar-empty">No tags yet</p>}
           </div>
-          <nav className="sidebar-trash">
-            <SidebarItem
-              icon={<Trash2 size={16} />}
-              active={view === 'trash'}
-              label="Trash"
-              onClick={() => openView('trash')}
+          <div className="library-account">
+            <span className="library-avatar">
+              {initials(session.user.name || session.user.email)}
+            </span>
+            <span className="library-account-name" title={session.user.email}>
+              {session.user.name || session.user.email}
+            </span>
+            <LibrarySettingsMenu
+              generating={thumbnailProgress}
+              projectCount={thumbnailProjects.length}
+              onGenerate={() => void generateAllThumbnails()}
+              onAccountSettings={() => setAccountSettingsOpen(true)}
+              onTrash={() => openView('trash')}
             />
-          </nav>
+          </div>
         </aside>
         {sidebarOpen && (
           <button
@@ -816,27 +834,63 @@ export function DashboardPage() {
         )}
 
         <main className="library-main">
-          <div className="library-heading-row">
+          <header className="library-heading-row">
+            <IconButton
+              label="Open library navigation"
+              className="library-menu-button"
+              onClick={() => setSidebarOpen(true)}
+            >
+              <Menu size={18} />
+            </IconButton>
             <div className="library-heading">
               {view === 'folder' && currentFolder && (
                 <Breadcrumbs folder={currentFolder} folders={activeFolders} onOpen={openView} />
               )}
-              <h1>{heading}</h1>
-              <p>
-                {displayedProjects.length} {displayedProjects.length === 1 ? 'project' : 'projects'}
-              </p>
+              <h1 className="h1">{heading}</h1>
+              <span className="library-heading-count tnum">{displayedProjects.length}</span>
             </div>
-            {!trash && (
-              <CreateMenu
-                importing={importing}
-                onBlankProject={() => setModal({ type: 'create-project', mode: 'blank' })}
-                onTemplateProject={() => setModal({ type: 'create-project', mode: 'template' })}
-                onFolder={() => setModal({ type: 'folder', parentId: currentFolder?.id ?? null })}
-                onImport={() => importRef.current?.click()}
-                onOverleaf={() => overleafImportRef.current?.click()}
-              />
-            )}
-          </div>
+            <div className="library-toolbar">
+              <label className="library-search">
+                <Search size={15} />
+                <span className="sr-only">Search projects</span>
+                <input
+                  className="fld"
+                  placeholder="Search"
+                  value={query}
+                  onChange={(event) => setRoute({ q: event.target.value || undefined })}
+                />
+              </label>
+              <select
+                className="fld library-sort"
+                aria-label="Sort projects"
+                value={sort}
+                onChange={(event) => setRoute({ sort: event.target.value as Sort })}
+                disabled={view === 'recent' && !query}
+              >
+                <option value="updated-desc">Last modified</option>
+                <option value="updated-asc">Oldest modified</option>
+                <option value="created-desc">Created</option>
+                <option value="name-asc">Name</option>
+                <option value="name-desc">Name Z–A</option>
+              </select>
+              <div className="seg seg-standard" role="group" aria-label="Project layout">
+                <IconButton
+                  label="List view"
+                  aria-pressed={layout === 'list'}
+                  onClick={() => setLayout('list')}
+                >
+                  <List size={16} />
+                </IconButton>
+                <IconButton
+                  label="Grid view"
+                  aria-pressed={layout === 'grid'}
+                  onClick={() => setLayout('grid')}
+                >
+                  <Grid2X2 size={16} />
+                </IconButton>
+              </div>
+            </div>
+          </header>
           <input
             ref={importRef}
             hidden
@@ -851,48 +905,6 @@ export function DashboardPage() {
             accept=".zip,application/zip"
             onChange={(event) => void importZip(event, true)}
           />
-
-          <div className="library-toolbar">
-            <label className="searchbox library-search">
-              <Search size={16} />
-              <span className="sr-only">Search projects</span>
-              <input
-                className="input"
-                placeholder="Search projects, folders, or tags"
-                value={query}
-                onChange={(event) => setRoute({ q: event.target.value || undefined })}
-              />
-            </label>
-            <select
-              className="select library-sort"
-              aria-label="Sort projects"
-              value={sort}
-              onChange={(event) => setRoute({ sort: event.target.value as Sort })}
-              disabled={view === 'recent' && !query}
-            >
-              <option value="updated-desc">Recently modified</option>
-              <option value="updated-asc">Least recently modified</option>
-              <option value="created-desc">Recently created</option>
-              <option value="name-asc">Name A–Z</option>
-              <option value="name-desc">Name Z–A</option>
-            </select>
-            <div className="view-toggle" aria-label="Project layout">
-              <IconButton
-                label="Grid view"
-                aria-pressed={layout === 'grid'}
-                onClick={() => setLayout('grid')}
-              >
-                <Grid2X2 size={16} />
-              </IconButton>
-              <IconButton
-                label="List view"
-                aria-pressed={layout === 'list'}
-                onClick={() => setLayout('list')}
-              >
-                <List size={17} />
-              </IconButton>
-            </div>
-          </div>
 
           {selection.size > 0 && !trash && view !== 'templates' && (
             <BulkBar
@@ -971,8 +983,9 @@ export function DashboardPage() {
                 </section>
               )}
               {displayedProjects.length > 0 && (
-                <section
-                  className={layout === 'grid' ? 'library-project-grid' : 'project-list'}
+                <div
+                  className={layout === 'grid' ? 'library-project-grid' : 'project-list tbl'}
+                  role={layout === 'list' ? 'table' : undefined}
                   aria-label="Projects"
                 >
                   {layout === 'list' && <ProjectListHeader />}
@@ -983,7 +996,7 @@ export function DashboardPage() {
                       layout={layout}
                       trash={trash}
                       selected={selection.has(project.id)}
-                      location={folderPath.get(project.folderId ?? '') ?? 'Library root'}
+                      location={folderPath.get(project.folderId ?? '') ?? '—'}
                       thumbnailGeneration={thumbnailGeneration}
                       templateView={view === 'templates'}
                       isStarter={starterTemplateIds.has(project.id)}
@@ -1024,7 +1037,7 @@ export function DashboardPage() {
                       onDelete={() => confirmProjectDelete([project.id])}
                     />
                   ))}
-                </section>
+                </div>
               )}
             </>
           ) : (
@@ -1065,7 +1078,7 @@ export function DashboardPage() {
               action={
                 !trash && !query && view !== 'templates' ? (
                   <Button
-                    variant="primary"
+                    variant="ghost"
                     onClick={() => setModal({ type: 'create-project', mode: 'blank' })}
                   >
                     New project
@@ -1309,7 +1322,12 @@ function ImportProgress({
           <span title={state.fileName}>{state.fileName}</span>
         </div>
         {!pending && (
-          <button type="button" onClick={onDismiss} aria-label="Dismiss import status">
+          <button
+            type="button"
+            onClick={onDismiss}
+            title="Dismiss import status"
+            aria-label="Dismiss import status"
+          >
             <X size={16} />
           </button>
         )}
@@ -1328,22 +1346,38 @@ function SidebarItem({
   icon,
   active,
   label,
+  count,
   onClick,
 }: {
-  icon: ReactNode;
+  icon?: ReactNode;
+  count?: number;
   active: boolean;
   label: string;
   onClick: () => void;
 }) {
   return (
-    <button className={classNames('sidebar-item', active && 'active')} onClick={onClick}>
+    <button
+      className="nv sidebar-item"
+      aria-label={label}
+      aria-current={active ? 'page' : undefined}
+      onClick={onClick}
+    >
       {icon}
       <span>{label}</span>
+      {count !== undefined && <span className="library-nav-count tnum">{count}</span>}
     </button>
   );
 }
 
-function RootDropItem({ active, onClick }: { active: boolean; onClick: () => void }) {
+function RootDropItem({
+  active,
+  count,
+  onClick,
+}: {
+  active: boolean;
+  count: number;
+  onClick: () => void;
+}) {
   const { setNodeRef, isOver } = useDroppable({
     id: 'folder:root',
     data: { folderId: null },
@@ -1351,11 +1385,13 @@ function RootDropItem({ active, onClick }: { active: boolean; onClick: () => voi
   return (
     <button
       ref={setNodeRef}
-      className={classNames('sidebar-item', active && 'active', isOver && 'drop-target')}
+      className={classNames('nv sidebar-item', isOver && 'drop-target')}
+      aria-label="All projects"
+      aria-current={active ? 'page' : undefined}
       onClick={onClick}
     >
-      <FolderOpen size={16} />
-      <span>Library</span>
+      <span>All projects</span>
+      <span className="library-nav-count tnum">{count}</span>
     </button>
   );
 }
@@ -1363,6 +1399,7 @@ function RootDropItem({ active, onClick }: { active: boolean; onClick: () => voi
 function FolderTreeRow(props: {
   folder: LibraryFolder;
   folders: LibraryFolder[];
+  projects: LibraryProject[];
   activeId: string | null;
   expanded: Set<string>;
   onExpanded: (value: Set<string>) => void;
@@ -1376,6 +1413,7 @@ function FolderTreeRow(props: {
   const {
     folder,
     folders,
+    projects,
     activeId,
     expanded,
     onExpanded,
@@ -1423,13 +1461,20 @@ function FolderTreeRow(props: {
       >
         <div className="folder-tree-lead" style={{ paddingLeft: 2 + depth * 16 }}>
           <button
-            className="tree-expander"
+            className="tb tree-expander"
+            title={
+              children.length
+                ? isOpen
+                  ? `Collapse ${folder.name}`
+                  : `Expand ${folder.name}`
+                : folder.name
+            }
             aria-label={
               children.length
                 ? isOpen
                   ? `Collapse ${folder.name}`
                   : `Expand ${folder.name}`
-                : undefined
+                : folder.name
             }
             onClick={() => {
               const next = new Set(expanded);
@@ -1451,17 +1496,22 @@ function FolderTreeRow(props: {
           </button>
           <button
             className="folder-tree-link"
+            aria-label={folder.name}
             title={folder.name}
             aria-current={activeId === folder.id ? 'page' : undefined}
             onClick={() => onOpen(folder.id)}
           >
             {isOpen && children.length ? <FolderOpen size={15} /> : <Folder size={15} />}
             <span>{folder.name}</span>
+            <span className="library-nav-count tnum">
+              {projects.filter((project) => project.folderId === folder.id).length}
+            </span>
           </button>
         </div>
         <div className="folder-tree-actions">
           <button
             className="tree-drag-handle"
+            title={`Move ${folder.name}`}
             aria-label={`Move ${folder.name}`}
             {...listeners}
             {...attributes}
@@ -1616,12 +1666,13 @@ function ProjectItem(props: {
     data: { type: 'project', id: project.id },
     disabled: trash,
   });
-  const visibleTags = layout === 'grid' ? 3 : 4;
+  const firstTag = project.tags[0];
   return (
-    <article
+    <div
       ref={setNodeRef}
+      role={layout === 'list' ? 'row' : undefined}
       className={classNames(
-        layout === 'grid' ? 'library-project-card' : 'project-list-row',
+        layout === 'grid' ? 'library-project-card crd crd-launcher' : 'project-list-row',
         selected && 'selected',
         isDragging && 'dragging',
       )}
@@ -1630,90 +1681,130 @@ function ProjectItem(props: {
       }}
     >
       {layout === 'grid' && (
-        <ProjectThumbnail
-          projectId={project.id}
-          jobId={project.previewJobId}
-          generate={props.thumbnailGeneration}
-        />
-      )}
-      {!props.templateView && (
-        <div className="project-select-cell">
-          <input
-            type="checkbox"
-            aria-label={`Select ${project.name}`}
-            checked={selected}
-            onChange={() => undefined}
-            onClick={(event) => {
-              event.stopPropagation();
-              props.onSelect(event.shiftKey);
-            }}
-          />
-        </div>
-      )}
-      {!trash && !props.templateView && (
-        <button
-          className={classNames('project-favorite', project.favorite && 'active')}
-          aria-label={
-            project.favorite
-              ? `Remove ${project.name} from favorites`
-              : `Add ${project.name} to favorites`
-          }
-          onClick={(event) => {
-            event.preventDefault();
-            event.stopPropagation();
-            props.onFavorite();
-          }}
+        <Link
+          to="/projects/$projectId"
+          params={{ projectId: project.id }}
+          className="project-preview-link"
+          aria-label={`Open ${project.name}`}
+          tabIndex={-1}
         >
-          <Star size={15} fill={project.favorite ? 'currentColor' : 'none'} />
-        </button>
+          <ProjectThumbnail
+            projectId={project.id}
+            jobId={project.previewJobId}
+            generate={props.thumbnailGeneration}
+          />
+        </Link>
       )}
-      <Link
-        to="/projects/$projectId"
-        params={{ projectId: project.id }}
-        className="project-primary"
-      >
-        {layout === 'list' && <FileCode2 size={17} />}
-        <div>
-          <h2>{project.name}</h2>
-          {props.templateView && (
-            <span className="template-label">
-              {props.isStarter ? 'Starter template' : 'Template'}
-            </span>
-          )}
-          {layout === 'grid' && <p>Updated {formatRelative(project.updatedAt)}</p>}
-        </div>
-      </Link>
-      <div className="project-tags-cell">
-        {project.tags.slice(0, visibleTags).map((tag) => (
-          <span key={tag.id} className={`project-tag tag-${tag.color}`}>
-            <span className="tag-dot" />
-            {tag.name}
-          </span>
-        ))}
-        {project.tags.length > visibleTags && (
-          <span className="tag-more">+{project.tags.length - visibleTags}</span>
+      <div className="project-favorite-cell" role={layout === 'list' ? 'cell' : undefined}>
+        {!trash && !props.templateView && (
+          <button
+            className={classNames(
+              'tb project-favorite',
+              layout === 'grid' && 'tb-star',
+              project.favorite && 'active',
+            )}
+            aria-label={
+              project.favorite
+                ? `Remove ${project.name} from favorites`
+                : `Add ${project.name} to favorites`
+            }
+            title={project.favorite ? 'Remove favorite' : 'Add favorite'}
+            onClick={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              props.onFavorite();
+            }}
+          >
+            <Star size={15} fill={project.favorite ? 'currentColor' : 'none'} />
+          </button>
+        )}
+        {!props.templateView && (
+          <div className="project-select-cell">
+            <input
+              type="checkbox"
+              aria-label={`Select ${project.name}`}
+              checked={selected}
+              onChange={() => undefined}
+              onClick={(event) => {
+                event.stopPropagation();
+                props.onSelect(event.shiftKey);
+              }}
+            />
+          </div>
         )}
       </div>
-      {layout === 'list' && (
-        <>
-          <span className="project-location" title={location}>
-            {location}
-          </span>
-          <span className="project-updated">{formatRelative(project.updatedAt)}</span>
-        </>
-      )}
-      <span className="project-compiler">{formatCompiler(project.compiler)}</span>
-      {!trash && !props.templateView && (
-        <button
-          className="project-drag-handle"
-          aria-label={`Move ${project.name}`}
-          {...listeners}
-          {...attributes}
+      <div className="project-name-cell" role={layout === 'list' ? 'cell' : undefined}>
+        {!trash && !props.templateView && (
+          <button
+            className="tb project-drag-handle"
+            title={`Move ${project.name}`}
+            aria-label={`Move ${project.name}`}
+            {...listeners}
+            {...attributes}
+          >
+            <GripVertical size={15} />
+          </button>
+        )}
+        <Link
+          to="/projects/$projectId"
+          params={{ projectId: project.id }}
+          className="project-primary"
         >
-          <GripVertical size={15} />
-        </button>
+          {layout === 'list' && (
+            <span className="project-mini-page">
+              <FileCode2 size={24} strokeWidth={1.3} aria-hidden="true" />
+            </span>
+          )}
+          <div>
+            <h2>{project.name}</h2>
+            {layout === 'list' && (
+              <span className="project-main-file code">
+                {project.mainFilePath ??
+                  (project.mainFileId ? 'Main document' : 'No main document')}
+              </span>
+            )}
+            {props.templateView && (
+              <span className="template-label">
+                {props.isStarter ? 'Starter template' : 'Template'}
+              </span>
+            )}
+          </div>
+        </Link>
+      </div>
+      <span
+        className="project-location"
+        title={location}
+        role={layout === 'list' ? 'cell' : undefined}
+      >
+        {layout === 'grid' && firstTag && (
+          <span title={firstTag.name} className={`tag-dot tag-${tagTone(firstTag)}`} />
+        )}
+        {location}
+      </span>
+      {layout === 'list' && (
+        <div className="project-tags-cell" role="cell">
+          {project.tags.slice(0, 2).map((tag) => (
+            <span key={tag.id} className={`project-tag tag-${tagTone(tag)}`}>
+              <span className="tag-dot" />
+              {tag.name}
+            </span>
+          ))}
+          {project.tags.length > 2 && <span className="tag-more">+{project.tags.length - 2}</span>}
+        </div>
       )}
-      <span className="project-item-menu">
+      {layout === 'list' && (
+        <span className="project-compiler" role="cell">
+          {formatCompiler(project.compiler)}
+        </span>
+      )}
+      <span
+        className="project-updated tnum"
+        role={layout === 'list' ? 'cell' : undefined}
+        title={new Date(project.updatedAt).toLocaleString()}
+      >
+        {formatRelative(project.updatedAt)}
+      </span>
+      <span className="project-item-menu" role={layout === 'list' ? 'cell' : undefined}>
         <ItemMenu label={`${project.name} actions`}>
           {trash ? (
             <>
@@ -1767,7 +1858,7 @@ function ProjectItem(props: {
                   </DropdownItem>
                 </>
               )}
-              <DropdownMenu.Item className="dropdown-item" asChild>
+              <DropdownMenu.Item className="mi" asChild>
                 <a href={appPath(`/api/v1/projects/${project.id}/export`)} download>
                   <Download size={14} /> Export ZIP
                 </a>
@@ -1779,20 +1870,26 @@ function ProjectItem(props: {
           )}
         </ItemMenu>
       </span>
-    </article>
+    </div>
   );
 }
 
 function ProjectListHeader() {
   return (
-    <div className="project-list-header" aria-hidden="true">
-      <span />
-      <span>Project</span>
-      <span>Tags</span>
-      <span>Location</span>
-      <span>Modified</span>
-      <span>Compiler</span>
-      <span />
+    <div className="project-list-header" role="row">
+      <span role="columnheader">
+        <span className="sr-only">Favorite</span>
+      </span>
+      <span role="columnheader">Name</span>
+      <span role="columnheader">Folder</span>
+      <span role="columnheader">Tag</span>
+      <span role="columnheader">Engine</span>
+      <span role="columnheader" className="num">
+        Modified
+      </span>
+      <span role="columnheader">
+        <span className="sr-only">Actions</span>
+      </span>
     </div>
   );
 }
@@ -1835,13 +1932,13 @@ function ItemMenu({ label, children }: { label: string; children: ReactNode }) {
   return (
     <DropdownMenu.Root modal={false}>
       <DropdownMenu.Trigger asChild>
-        <IconButton label={label}>
+        <IconButton label={label} className="ib-row">
           <MoreHorizontal size={17} />
         </IconButton>
       </DropdownMenu.Trigger>
       <DropdownMenu.Portal>
         <DropdownMenu.Content
-          className="dropdown"
+          className="menu"
           align="end"
           side="bottom"
           sideOffset={6}
@@ -1859,7 +1956,9 @@ function LibrarySettingsMenu({
   projectCount,
   onGenerate,
   onAccountSettings,
+  onTrash,
 }: {
+  onTrash: () => void;
   generating: ThumbnailProgressState | null;
   projectCount: number;
   onGenerate: () => void;
@@ -1874,14 +1973,18 @@ function LibrarySettingsMenu({
         </IconButton>
       </DropdownMenu.Trigger>
       <DropdownMenu.Portal>
-        <DropdownMenu.Content className="dropdown" align="end" sideOffset={6}>
-          <DropdownMenu.Item className="dropdown-item" onSelect={onAccountSettings}>
+        <DropdownMenu.Content className="menu" align="end" sideOffset={6}>
+          <DropdownMenu.Item className="mi" onSelect={onAccountSettings}>
             <Settings size={15} />
             Account settings
           </DropdownMenu.Item>
-          <DropdownMenu.Separator className="dropdown-separator" />
+          <DropdownMenu.Item className="mi" onSelect={onTrash}>
+            <Trash2 size={15} />
+            Trash
+          </DropdownMenu.Item>
+          <DropdownMenu.Separator className="msep" />
           <DropdownMenu.Item
-            className="dropdown-item"
+            className="mi"
             disabled={Boolean(generating) || projectCount === 0}
             onSelect={onGenerate}
           >
@@ -1908,10 +2011,7 @@ function DropdownItem({
   onSelect: () => void;
 }) {
   return (
-    <DropdownMenu.Item
-      className={classNames('dropdown-item', danger && 'dropdown-danger')}
-      onSelect={onSelect}
-    >
+    <DropdownMenu.Item className={classNames('mi', danger && 'mi-danger')} onSelect={onSelect}>
       {icon}
       {children}
     </DropdownMenu.Item>
@@ -1937,21 +2037,21 @@ function CreateMenu({
     <DropdownMenu.Root>
       <DropdownMenu.Trigger asChild>
         <Button variant="primary" disabled={importing}>
-          <Plus size={16} /> {importing ? 'Importing…' : 'New'} <ChevronDown size={14} />
+          <Plus size={16} /> {importing ? 'Importing' : 'New project'} <ChevronDown size={14} />
         </Button>
       </DropdownMenu.Trigger>
       <DropdownMenu.Portal>
-        <DropdownMenu.Content className="dropdown" align="end" sideOffset={6}>
+        <DropdownMenu.Content className="menu" align="end" sideOffset={6}>
           <DropdownItem icon={<FileCode2 size={15} />} onSelect={onBlankProject}>
-            New Blank Project
+            Blank project
           </DropdownItem>
           <DropdownItem icon={<LayoutTemplate size={15} />} onSelect={onTemplateProject}>
-            New Project from Template
+            From template
           </DropdownItem>
           <DropdownItem icon={<FolderPlus size={15} />} onSelect={onFolder}>
-            New Directory
+            New folder
           </DropdownItem>
-          <DropdownMenu.Separator className="dropdown-separator" />
+          <DropdownMenu.Separator className="msep" />
           <DropdownItem icon={<Upload size={15} />} onSelect={onImport}>
             Import project ZIP
           </DropdownItem>
@@ -2041,7 +2141,7 @@ function ProjectCreateDialog({
     <Dialog
       open
       onOpenChange={(open) => !open && onClose()}
-      title={mode === 'template' ? 'New Project from Template' : 'New Blank Project'}
+      title={mode === 'template' ? 'From template' : 'Blank project'}
       wide={mode === 'template'}
       description={
         destination
@@ -2063,7 +2163,7 @@ function ProjectCreateDialog({
           Project name
           <input
             autoFocus
-            className="input"
+            className="fld"
             value={name}
             onChange={(event) => setName(event.target.value)}
             maxLength={120}
@@ -2145,7 +2245,7 @@ function ProjectCreateDialog({
           </p>
         )}
         <div className="dialog-actions">
-          <Button type="button" onClick={onClose}>
+          <Button type="button" variant="ghost" onClick={onClose}>
             Cancel
           </Button>
           <Button variant="primary" disabled={pending}>
@@ -2208,7 +2308,7 @@ function FolderEditDialog({
           Folder name
           <input
             autoFocus
-            className="input"
+            className="fld"
             value={name}
             onChange={(event) => setName(event.target.value)}
             maxLength={120}
@@ -2216,7 +2316,7 @@ function FolderEditDialog({
           />
         </label>
         <div className="dialog-actions">
-          <Button type="button" onClick={onClose}>
+          <Button type="button" variant="ghost" onClick={onClose}>
             Cancel
           </Button>
           <Button variant="primary" disabled={pending}>
@@ -2253,7 +2353,7 @@ function RenameProjectDialog({
           Project name
           <input
             autoFocus
-            className="input"
+            className="fld"
             value={name}
             onChange={(event) => setName(event.target.value)}
             maxLength={120}
@@ -2261,7 +2361,7 @@ function RenameProjectDialog({
           />
         </label>
         <div className="dialog-actions">
-          <Button type="button" onClick={onClose}>
+          <Button type="button" variant="ghost" onClick={onClose}>
             Cancel
           </Button>
           <Button variant="primary" disabled={pending}>
@@ -2317,7 +2417,7 @@ function MoveDialog({
           Move to <strong>{destination}</strong>
         </p>
         <div className="dialog-actions">
-          <Button type="button" onClick={onClose}>
+          <Button type="button" variant="ghost" onClick={onClose}>
             Cancel
           </Button>
           <Button variant="primary" disabled={pending}>
@@ -2493,8 +2593,10 @@ function FolderPickerRow({
     >
       <button
         type="button"
-        className="tree-expander"
+        className="tb tree-expander"
         tabIndex={-1}
+        title={expandable ? `${expanded ? 'Collapse' : 'Expand'} ${label}` : label}
+        aria-label={expandable ? `${expanded ? 'Collapse' : 'Expand'} ${label}` : label}
         disabled={!expandable}
         onClick={(event) => {
           event.stopPropagation();
@@ -2540,7 +2642,7 @@ function TagEditDialog({
           Tag name
           <input
             autoFocus
-            className="input"
+            className="fld"
             value={name}
             onChange={(event) => setName(event.target.value)}
             maxLength={40}
@@ -2563,7 +2665,7 @@ function TagEditDialog({
           ))}
         </fieldset>
         <div className="dialog-actions">
-          <Button type="button" onClick={onClose}>
+          <Button type="button" variant="ghost" onClick={onClose}>
             Cancel
           </Button>
           <Button variant="primary" disabled={pending}>
@@ -2621,7 +2723,7 @@ function TagAssignmentDialog({
                 }}
                 onChange={() => onToggle(tag.id, state !== 'all')}
               />
-              <span className={`tag-dot tag-${tag.color}`} />
+              <span className={`tag-dot tag-${tagTone(tag)}`} />
               <span>{tag.name}</span>
               {state === 'some' && <small>Some</small>}
             </label>
@@ -2800,4 +2902,22 @@ function actionMessage(action: string, count: number) {
   if (action === 'delete') return `${noun} permanently deleted`;
   if (action === 'favorite') return `${noun} updated`;
   return `${noun} tags updated`;
+}
+
+function initials(value: string) {
+  return value
+    .split(/\s+/)
+    .slice(0, 2)
+    .map((part) => part[0] ?? '')
+    .join('')
+    .toUpperCase();
+}
+function tagTone(tag: Pick<ProjectTag, 'name' | 'color'>): TagColor {
+  const conventional: Record<string, TagColor> = {
+    paper: 'magenta',
+    homework: 'cyan',
+    notes: 'orange',
+    beamer: 'amber',
+  };
+  return conventional[tag.name.toLocaleLowerCase()] ?? tag.color;
 }

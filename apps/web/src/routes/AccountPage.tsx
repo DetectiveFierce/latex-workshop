@@ -1,8 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Link, useNavigate } from '@tanstack/react-router';
+import { useNavigate } from '@tanstack/react-router';
 import {
-  ArrowLeft,
   Bot,
   Copy,
   ExternalLink,
@@ -27,8 +26,7 @@ import {
   type Project,
 } from '@latex-workshop/contracts';
 import { Button } from '../components/Button';
-import { Dialog } from '../components/Dialog';
-import { Logo } from '../components/Logo';
+import { WorkshopSettingsDialog } from '../features/settings/ProjectSettingsControl';
 import { AgentProjectPicker } from '../features/agent-proposals/AgentProjectPicker';
 import { clearPreservedOAuthConsentQuery } from '../features/agent-proposals/oauthConsentQuery';
 import { authClient } from '../lib/auth';
@@ -43,19 +41,17 @@ import {
 } from '../lib/keyboardShortcuts';
 
 export function AccountPage() {
+  const navigate = useNavigate();
   return (
-    <div className="app-shell">
-      <header className="topbar">
-        <Logo />
-        <Link to="/projects" search={{}} className="button button-ghost">
-          <ArrowLeft size={16} /> Projects
-        </Link>
-      </header>
-      <main className="account-card">
-        <h1>Account settings</h1>
-        <AccountSettingsContent />
-      </main>
-    </div>
+    <WorkshopSettingsDialog
+      open
+      onOpenChange={(open) => {
+        if (!open) void navigate({ to: '/projects', search: {} });
+      }}
+      initialSection={
+        window.location.hash === '#keyboard-shortcuts' ? 'keyboard-shortcuts' : 'account'
+      }
+    />
   );
 }
 
@@ -69,20 +65,11 @@ export function AccountSettingsDialog({
   initialSection?: 'account' | 'keyboard-shortcuts';
 }) {
   return (
-    <Dialog
+    <WorkshopSettingsDialog
       open={open}
       onOpenChange={onOpenChange}
-      title="Account settings"
-      description="Manage security, shortcuts, sessions, and account access."
-      wide
-    >
-      <div className="account-dialog-body">
-        <AccountSettingsContent
-          focusKeyboard={open && initialSection === 'keyboard-shortcuts'}
-          onClose={() => onOpenChange(false)}
-        />
-      </div>
-    </Dialog>
+      initialSection={initialSection}
+    />
   );
 }
 
@@ -95,10 +82,12 @@ export type PendingAgentConsent = {
 
 export function AccountSettingsContent({
   focusKeyboard = false,
+  section,
   onClose,
   pendingConsent,
 }: {
   focusKeyboard?: boolean;
+  section?: 'account' | 'keyboard-shortcuts' | 'agent-access';
   onClose?: () => void;
   pendingConsent?: PendingAgentConsent | undefined;
 }) {
@@ -137,93 +126,103 @@ export function AccountSettingsContent({
   return (
     <>
       <p className="hint account-identity">Signed in as {session.user.email}</p>
-      <section className="account-section">
-        <h2>
-          <ShieldCheck size={18} aria-hidden="true" /> Security
-        </h2>
-        <form onSubmit={changePassword}>
-          <label className="field">
-            Current password
-            <input
-              className="input"
-              type="password"
-              autoComplete="current-password"
-              value={currentPassword}
-              onChange={(event) => setCurrentPassword(event.target.value)}
-              required
-            />
-          </label>
-          <label className="field">
-            New password
-            <input
-              className="input"
-              type="password"
-              minLength={8}
-              autoComplete="new-password"
-              value={newPassword}
-              onChange={(event) => setNewPassword(event.target.value)}
-              required
-            />
-          </label>
-          <Button type="submit">Change password</Button>
-        </form>
-        {error && (
-          <p className="field-error" role="alert">
-            {error}
-          </p>
-        )}
-        {message && (
-          <p className="status-ok" role="status">
-            {message}
-          </p>
-        )}
-        <Button
-          onClick={async () => {
-            await authClient.revokeOtherSessions();
-            setMessage('Other sessions revoked.');
-          }}
-        >
-          Revoke other sessions
-        </Button>
-      </section>
-      <AgentAccessSettings pendingConsent={pendingConsent} />
-      <KeyboardShortcutSettings
-        userId={session.user.id}
-        queryClient={queryClient}
-        focusOnOpen={focusKeyboard}
-      />
-      <section className="account-section">
-        <h2>Session</h2>
-        <Button
-          onClick={async () => {
-            await authClient.signOut();
-            onClose?.();
-            await navigate({ to: '/auth' });
-          }}
-        >
-          <LogOut size={16} aria-hidden="true" /> Sign out
-        </Button>
-      </section>
-      <section className="account-section">
-        <h2 style={{ color: 'var(--hon-red)' }}>Delete account</h2>
-        <p className="hint">
-          This permanently removes your projects, history, and compiled documents.
-        </p>
-        <div>
+      {(!section || section === 'account') && (
+        <section className="account-section">
+          <h2>
+            <ShieldCheck size={18} aria-hidden="true" /> Security
+          </h2>
+          <form onSubmit={changePassword}>
+            <label className="field">
+              Current password
+              <input
+                className="input"
+                type="password"
+                autoComplete="current-password"
+                value={currentPassword}
+                onChange={(event) => setCurrentPassword(event.target.value)}
+                required
+              />
+            </label>
+            <label className="field">
+              New password
+              <input
+                className="input"
+                type="password"
+                minLength={8}
+                autoComplete="new-password"
+                value={newPassword}
+                onChange={(event) => setNewPassword(event.target.value)}
+                required
+              />
+            </label>
+            <Button type="submit">Change password</Button>
+          </form>
+          {error && (
+            <p className="field-error" role="alert">
+              {error}
+            </p>
+          )}
+          {message && (
+            <p className="status-ok" role="status">
+              {message}
+            </p>
+          )}
           <Button
-            variant="danger"
             onClick={async () => {
-              if (!window.confirm('Permanently delete your account and all projects?')) return;
-              const result = await authClient.deleteUser({
-                callbackURL: `${window.location.origin}${appPath('/auth')}`,
-              });
-              if (result.error) setError(result.error.message ?? 'Unable to delete account');
+              await authClient.revokeOtherSessions();
+              setMessage('Other sessions revoked.');
             }}
           >
-            <Trash2 size={16} aria-hidden="true" /> Delete account
+            Revoke other sessions
           </Button>
-        </div>
-      </section>
+        </section>
+      )}
+      {(!section || section === 'agent-access') && (
+        <AgentAccessSettings pendingConsent={pendingConsent} />
+      )}
+      {(!section || section === 'keyboard-shortcuts') && (
+        <KeyboardShortcutSettings
+          userId={session.user.id}
+          queryClient={queryClient}
+          focusOnOpen={focusKeyboard}
+        />
+      )}
+      {(!section || section === 'account') && (
+        <>
+          <section className="account-section">
+            <h2>Session</h2>
+            <Button
+              onClick={async () => {
+                await authClient.signOut();
+                onClose?.();
+                await navigate({ to: '/auth' });
+              }}
+            >
+              <LogOut size={16} aria-hidden="true" /> Sign out
+            </Button>
+          </section>
+          <section className="account-section">
+            <h2 style={{ color: 'var(--hon-red)' }}>Delete account</h2>
+            <p className="hint">
+              This permanently removes your projects, history, and compiled documents.
+            </p>
+            <div>
+              <Button
+                variant="danger"
+                onClick={async () => {
+                  if (!window.confirm('Permanently delete your account and all projects?')) return;
+                  const result = await authClient.deleteUser({
+                    callbackURL: `${window.location.origin}${appPath('/auth')}`,
+                  });
+                  if (result.error) setError(result.error.message ?? 'Unable to delete account');
+                }}
+              >
+                <Trash2 size={16} aria-hidden="true" /> Delete account
+              </Button>
+            </div>
+          </section>
+        </>
+      )}
     </>
   );
 }
@@ -774,6 +773,7 @@ function KeyboardShortcutSettings({
                 </button>
                 <button
                   title="Reset shortcut"
+                  aria-label="Reset shortcut"
                   onClick={() =>
                     setDraft((value) => {
                       const next = { ...value };
@@ -822,7 +822,7 @@ function KeyboardShortcutSettings({
           Cancel
         </Button>
         <Button disabled={!dirty} onClick={() => void save()}>
-          Save
+          Save shortcuts
         </Button>
       </div>
     </section>

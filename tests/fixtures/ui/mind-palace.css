@@ -1,0 +1,4 @@
+/* Test copy of the shared stylesheet for CI, where the private workspace is absent.
+   Fonts are left out on purpose. design-system/tests checks these files stay in sync. */
+@import url(tokens.css);
+@import url(components.css);

@@ -8,25 +8,19 @@ import {
   ChevronLeft,
   ChevronRight,
   CircleAlert,
-  CircleStop,
   Code2,
-  Command,
-  Copy,
+  Play,
   File,
   FileImage,
   FilePlus2,
-  FileSearch,
   Folder,
-  FolderInput,
   FolderOpen,
   FolderPlus,
   History,
   LoaderCircle,
   PanelBottomClose,
   PanelBottomOpen,
-  Pencil,
-  Play,
-  Target,
+  Search,
   Trash2,
   Upload,
   X,
@@ -46,10 +40,8 @@ import type {
 } from '@latex-workshop/contracts';
 import { inverseSyncResultSchema, shortcutRegistry } from '@latex-workshop/contracts';
 import { Button, IconButton } from '../components/Button';
-import { AppearanceMenu } from '../components/AppearanceMenu';
 import { Dialog } from '../components/Dialog';
 import { Toast, type ToastState } from '../components/Toast';
-import { AccountSettingsDialog } from './AccountPage';
 import {
   disposeEditorEntry,
   disposeProjectEditors,
@@ -98,12 +90,18 @@ import { api, appPath, queryKeys } from '../lib/api';
 import { authClient } from '../lib/auth';
 import { prefersTouchWorkspace, TOUCH_WORKSPACE_MEDIA } from '../lib/layout';
 import { projectDocumentTitle } from '../lib/document-title';
+import { SourceOutline, type DocumentSymbolReader } from '../features/outline/SourceOutline';
+import type { OutlineNode } from '../features/outline/outlineModel';
+import { CompileControl } from '../features/workspace/CompileControl';
+import { VersionMenu } from '../features/workspace/VersionMenu';
+import { CommandPalette } from '../features/commands/CommandPalette';
+import './workspace-redesign.css';
 import { FileTree } from '../features/files/FileTree.js';
 import { ProjectTitleControl } from '../features/settings/ProjectTitleControl';
 import { classNames, formatRelative, isTextFile } from '../lib/utils';
 import { useAppearance } from '../lib/appearance';
 import {
-  displayShortcut,
+  shortcutHint,
   resolvedShortcuts,
   shortcutStrokeCandidatesFromEvent,
   useKeyboardShortcuts,
@@ -171,9 +169,8 @@ export default function WorkspacePage() {
   const [editHistoryOpen, setEditHistoryOpen] = useState(false);
   const [editHistories, setEditHistories] = useState<Record<string, EditHistoryResponse>>({});
   const projectSettingsRef = useRef<ProjectSettingsControlHandle>(null);
-  const [accountSettings, setAccountSettings] = useState<'account' | 'keyboard-shortcuts' | null>(
-    null,
-  );
+  const [sideTab, setSideTab] = useState<'files' | 'search' | 'outline'>('files');
+  const [symbolReader, setSymbolReader] = useState<DocumentSymbolReader | null>(null);
   const [conflictState, setConflictState] = useState<{
     entryId: string;
     local: string;
@@ -201,7 +198,7 @@ export default function WorkspacePage() {
   const [projectSearchOpen, setProjectSearchOpen] = useState(false);
   const [projectSearchQuery, setProjectSearchQuery] = useState('');
   const [projectSearchReplacement, setProjectSearchReplacement] = useState('');
-  const [projectReplaceOpen, setProjectReplaceOpen] = useState(false);
+  const [projectReplaceOpen, setProjectReplaceOpen] = useState(true);
   const [projectSearchOptions, setProjectSearchOptions] = useState<ProjectSearchOptions>(
     DEFAULT_PROJECT_SEARCH_OPTIONS,
   );
@@ -210,7 +207,7 @@ export default function WorkspacePage() {
   const [projectSearchLoading, setProjectSearchLoading] = useState(false);
   const [projectSearchReplacing, setProjectSearchReplacing] = useState(false);
   const [projectSearchFailedFiles, setProjectSearchFailedFiles] = useState(0);
-  const [treeWidth, setTreeWidth] = useState(initialPreferences.current.treeWidth);
+  const treeWidth = 272;
   const [editorWidth, setEditorWidth] = useState(initialPreferences.current.editorWidth);
   const [toast, setToast] = useState<ToastState | null>(null);
   const [entryDialog, setEntryDialog] = useState<{
@@ -653,7 +650,7 @@ export default function WorkspacePage() {
         void openProjectSearch();
         break;
       case 'workspace.keyboardShortcuts':
-        setAccountSettings('keyboard-shortcuts');
+        projectSettingsRef.current?.open('keyboard-shortcuts');
         break;
       case 'workspace.history':
         setHistoryOpen(true);
@@ -747,21 +744,23 @@ export default function WorkspacePage() {
     }
   }
 
-  async function openProjectSearch() {
+  async function openProjectSearch(reset = true, reveal = true) {
     const requestId = ++projectSearchRequestRef.current;
-    setProjectSearchQuery('');
-    setProjectSearchReplacement('');
-    setProjectReplaceOpen(false);
-    setProjectSearchOptions(DEFAULT_PROJECT_SEARCH_OPTIONS);
-    setProjectSearchActive(0);
+    if (reset) {
+      setProjectSearchQuery('');
+      setProjectSearchReplacement('');
+      setProjectReplaceOpen(true);
+      setProjectSearchOptions(DEFAULT_PROJECT_SEARCH_OPTIONS);
+      setProjectSearchActive(0);
+    }
     setProjectSearchOpen(true);
     setProjectSearchLoading(true);
     setProjectSearchFailedFiles(0);
-    setSelectedId(PROJECT_SEARCH_TAB_ID);
-    setMobilePanel('editor');
-    setOpenTabs((tabs) =>
-      tabs.includes(PROJECT_SEARCH_TAB_ID) ? tabs : [...tabs, PROJECT_SEARCH_TAB_ID],
-    );
+    if (reveal) {
+      setSideTab('search');
+      setFilesVisible(true);
+      setMobilePanel('files');
+    }
     const sourceEntries = entries.filter(
       (entry) => entry.kind === 'file' && isTextFile(entry.name, entry.mimeType),
     );
@@ -900,7 +899,9 @@ export default function WorkspacePage() {
   }
 
   function closeProjectSearch() {
-    closeTab(PROJECT_SEARCH_TAB_ID);
+    setProjectSearchOpen(false);
+    setSideTab('files');
+    projectSearchRequestRef.current += 1;
   }
 
   function updateEditHistory(entryId: string, history: EditHistoryResponse) {
@@ -1486,10 +1487,11 @@ export default function WorkspacePage() {
     }
   }
 
-  async function forwardSearch(selection?: SourceSelection) {
-    const syncPath = selected ? paths.get(selected.id) : proposalOpenPath;
-    const syncContent = selected
-      ? currentContent
+  async function forwardSearch(selection?: SourceSelection, targetEntry?: ProjectEntry) {
+    const syncEntry = targetEntry ?? selected;
+    const syncPath = syncEntry ? paths.get(syncEntry.id) : proposalOpenPath;
+    const syncContent = syncEntry
+      ? contents[syncEntry.id]
       : activeEditorId
         ? contents[activeEditorId]
         : null;
@@ -1629,7 +1631,7 @@ export default function WorkspacePage() {
     const pointerId = event.pointerId;
     target.setPointerCapture(pointerId);
     const startX = event.clientX;
-    const start = kind === 'tree' ? treeWidth : editorWidth;
+    const start = editorWidth;
     const previewMin = 240;
     const editorMin = 280;
     const move = (moveEvent: PointerEvent) => {
@@ -1644,8 +1646,7 @@ export default function WorkspacePage() {
           start + moveEvent.clientX - startX,
         ),
       );
-      if (kind === 'tree') setTreeWidth(next);
-      else setEditorWidth(next);
+      if (kind === 'editor') setEditorWidth(next);
     };
     const stop = (stopEvent: PointerEvent) => {
       if (stopEvent.pointerId !== pointerId) return;
@@ -1657,6 +1658,41 @@ export default function WorkspacePage() {
     target.addEventListener('pointermove', move);
     target.addEventListener('pointerup', stop);
     target.addEventListener('pointercancel', stop);
+  }
+
+  const outlineSources = useMemo(
+    () =>
+      entries
+        .filter((entry) => entry.kind === 'file' && entry.name.endsWith('.tex'))
+        .map((entry) => {
+          const cached = contents[entry.id];
+          return {
+            entryId: entry.id,
+            path: paths.get(entry.id) ?? entry.name,
+            version: cached?.version ?? entry.version,
+            ...(cached ? { content: cached.content } : {}),
+          };
+        }),
+    [entries, paths, contents],
+  );
+  async function openOutlineNode(node: OutlineNode) {
+    const target = entries.find((entry) => paths.get(entry.id) === node.path);
+    if (!target) return;
+    await openEntry(target);
+    setNavigation((old) => ({ line: node.line, token: (old?.token ?? 0) + 1 }));
+    setCursor({ line: node.line, column: 1 });
+    if (successfulCompile)
+      await forwardSearch(
+        {
+          start: { line: node.line, column: 1 },
+          end: { line: node.line, column: 1 },
+          text: '',
+          before: '',
+          after: '',
+        },
+        target,
+      );
+    setMobilePanel('editor');
   }
 
   if (sessionPending || !session?.user || projectQuery.isPending || !payload)
@@ -1675,7 +1711,6 @@ export default function WorkspacePage() {
         <Button onClick={() => void projectQuery.refetch()}>Try again</Button>
       </main>
     );
-  const currentContent = selected ? contents[selected.id] : null;
   const virtualFile = agentProposal.virtualFiles.find(
     (file) => `proposal:${file.changeId}` === selectedId,
   );
@@ -1712,11 +1747,17 @@ export default function WorkspacePage() {
   return (
     <main className="workspace">
       <header className="workspace-toolbar">
-        <Link to="/projects" search={{}} className="icon-button" aria-label="Back to projects">
+        <Link
+          to="/projects"
+          search={{}}
+          className="ib"
+          aria-label="Back to projects"
+          title="Back to projects"
+        >
           <ArrowLeft size={17} />
         </Link>
+        <img className="workspace-mark" src="/ui/v1/icons/latex-workshop.svg" alt="" />
         <div className="project-title">
-          <Code2 size={17} />
           <ProjectTitleControl
             key={projectId}
             projectId={projectId}
@@ -1732,84 +1773,125 @@ export default function WorkspacePage() {
             }}
             onError={(message) => setToast({ id: Date.now(), tone: 'error', message })}
           />
-          {payload.project.isTemplate && <span className="badge">Template</span>}
-          {successfulCompile &&
-            successfulCompile.sourceRevision < payload.project.sourceRevision && (
-              <span className="badge badge-warning">PDF out of date</span>
-            )}
         </div>
-        <label className="badge">
-          <input
-            type="checkbox"
-            checked={autoCompileEnabled}
-            onChange={(event) => void setAutoCompile(event.target.checked)}
-          />{' '}
-          Auto
-        </label>
-        {activeCompile ? (
-          <Button
-            className="compile-button running"
-            onClick={() =>
-              void api(`/api/v1/projects/${projectId}/compilations/${activeCompile.id}`, {
-                method: 'DELETE',
-              })
+        <span className="pill workspace-compile-status">
+          <span
+            className="dot"
+            data-tone={
+              activeCompile
+                ? 'warn'
+                : displayedCompile?.status === 'failed'
+                  ? 'bad'
+                  : successfulCompile
+                    ? undefined
+                    : 'muted'
             }
-          >
-            <LoaderCircle className="spin" size={16} />{' '}
-            {activeCompile.status === 'queued' ? 'Queued' : 'Compiling'} <CircleStop size={15} />
-          </Button>
-        ) : (
-          <Button className="compile-button" onClick={requestManualCompile}>
-            <Play size={15} /> Compile
-          </Button>
-        )}
-        <div className="workspace-toolbar-extras">
-          <IconButton
-            label="Forward search"
-            disabled={!successfulCompile || !selectedPath}
-            onClick={() => void forwardSearch()}
-          >
-            <Target size={17} />
-          </IconButton>
-          <IconButton
-            label={`Search the current project${shortcuts['workspace.projectSearch'] ? ` (${displayShortcut(shortcuts['workspace.projectSearch'])})` : ''}`}
-            onClick={() => void openProjectSearch()}
-          >
-            <FileSearch size={17} />
-          </IconButton>
-          <IconButton
-            label={`Command palette${shortcuts['workspace.commandPalette'] ? ` (${displayShortcut(shortcuts['workspace.commandPalette'])})` : ''}`}
-            onClick={() => {
-              setPaletteQuery('');
-              setPaletteOpen(true);
-            }}
-          >
-            <Command size={17} />
-          </IconButton>
-          <IconButton label="Version history" onClick={() => setHistoryOpen(true)}>
-            <History size={17} />
-          </IconButton>
+          />
+          {activeCompile
+            ? 'Compiling'
+            : successfulCompile
+              ? `Compiled${successfulCompile.durationMs !== null ? ` ${(successfulCompile.durationMs / 1000).toFixed(1)} s` : ''} · ${Object.values(saveStates).some((state) => state !== 'saved') ? 'saving' : 'saved'}`
+              : 'Not compiled'}
+        </span>
+        <button
+          className="cmdk workspace-command"
+          onClick={() => {
+            setPaletteQuery('');
+            setPaletteOpen(true);
+          }}
+        >
+          <Search size={14} />
+          <span>Search or run a command</span>
+          {shortcuts['workspace.commandPalette'] && (
+            <kbd className="kbd">{shortcutHint(shortcuts['workspace.commandPalette'])}</kbd>
+          )}
+        </button>
+        <div className="workspace-header-actions">
+          <VersionMenu projectId={projectId} onOpen={() => setHistoryOpen(true)} />
           <ProjectSettingsControl
             ref={projectSettingsRef}
             project={payload.project}
             entries={entries}
+            autoCompile={autoCompileEnabled}
+            onAutoCompileChange={(value) => void setAutoCompile(value)}
             onSaved={() => void projectQuery.refetch()}
-            onOpenProfileSettings={() => setAccountSettings('account')}
+            onOpenProfileSettings={() => projectSettingsRef.current?.open('account')}
           />
-          <AppearanceMenu />
         </div>
+        <CompileControl
+          project={payload.project}
+          entries={entries}
+          autoCompile={autoCompileEnabled}
+          running={Boolean(activeCompile)}
+          stale={Boolean(
+            successfulCompile && successfulCompile.sourceRevision < payload.project.sourceRevision,
+          )}
+          errors={
+            displayedCompile?.status === 'failed'
+              ? displayedCompile.diagnostics.filter((item) => item.severity === 'error').length
+              : 0
+          }
+          shortcut={
+            shortcuts['workspace.compile']
+              ? shortcutHint(shortcuts['workspace.compile'])
+              : undefined
+          }
+          onCompile={requestManualCompile}
+          onStop={() => {
+            if (activeCompile)
+              void api(`/api/v1/projects/${projectId}/compilations/${activeCompile.id}`, {
+                method: 'DELETE',
+              });
+          }}
+          onAutoCompile={(value) => void setAutoCompile(value)}
+          onProjectChange={(update) => {
+            void api(`/api/v1/projects/${projectId}`, {
+              method: 'PATCH',
+              body: JSON.stringify(update),
+            })
+              .then(() => projectQuery.refetch())
+              .catch((error: unknown) =>
+                setToast({
+                  id: Date.now(),
+                  tone: 'error',
+                  message: error instanceof Error ? error.message : 'Unable to save project',
+                }),
+              );
+          }}
+          onProblems={() => {
+            setBottomTab('problems');
+            setProblemsOpen(true);
+          }}
+          onLogs={() => {
+            setBottomTab('logs');
+            setProblemsOpen(true);
+          }}
+          onClearCache={() => {
+            void api(`/api/v1/projects/${projectId}/build-cache/clear`, { method: 'POST' })
+              .then(() =>
+                setToast({ id: Date.now(), tone: 'success', message: 'Build metadata cleared' }),
+              )
+              .catch((error: unknown) =>
+                setToast({
+                  id: Date.now(),
+                  tone: 'error',
+                  message: error instanceof Error ? error.message : 'Unable to clear build cache',
+                }),
+              );
+          }}
+        />
       </header>
       <nav className="mobile-switcher" aria-label="Workspace panes">
         {(['files', 'editor', 'preview'] as const).map((panel) => (
           <button
             key={panel}
-            className={mobilePanel === panel ? 'active' : ''}
+            className="tb"
+            aria-pressed={mobilePanel === panel}
             onClick={() => setMobilePanel(panel)}
           >
             {panel[0]!.toUpperCase() + panel.slice(1)}
           </button>
         ))}
-        <AppearanceMenu />
       </nav>
       <div
         className="workspace-main"
@@ -1832,199 +1914,96 @@ export default function WorkspacePage() {
             mobilePanel === 'files' && 'mobile-active',
           )}
         >
-          <div className="panel-header">
-            <span>Files</span>
-            {!touchLayout && (
-              <IconButton label="Hide file tree" onClick={() => setFilesVisible(false)}>
-                <ChevronLeft size={15} />
-              </IconButton>
-            )}
-            <IconButton label="New file" onClick={() => void createEntry('file')}>
-              <FilePlus2 size={15} />
-            </IconButton>
-            <IconButton label="New folder" onClick={() => void createEntry('folder')}>
-              <FolderPlus size={15} />
-            </IconButton>
-            <input ref={uploadRef} hidden type="file" onChange={uploadFile} />
-            <IconButton label="Upload file" onClick={() => uploadRef.current?.click()}>
-              <Upload size={15} />
-            </IconButton>
-          </div>
-          <div className="file-tree">
-            <FileTree
-              entries={entries}
-              proposalChanges={activeProposal?.changes ?? []}
-              selectedId={selectedId}
-              onSelect={(entry) => void openEntry(entry)}
-              onCreate={(kind, entry) => void createEntry(kind, entry)}
-              onRename={renameEntry}
-              onDuplicate={duplicateEntry}
-              onDelete={deleteEntry}
-              onRequestMove={moveEntry}
-              onMove={(entryId, parentId) =>
-                mutateEntry.mutate({ id: entryId, method: 'PATCH', body: { parentId } })
-              }
-            />
-            {activeProposal?.changes
-              .filter((change) => !change.entryId && change.decision !== 'rejected')
-              .map((change) => (
-                <button
-                  type="button"
-                  className="tree-row proposal-added"
-                  key={change.id}
-                  onClick={() => {
-                    if (change.entryKind === 'file' && change.targetPath)
-                      openProposalPath(change.targetPath);
-                  }}
-                >
-                  {change.entryKind === 'folder' ? <Folder size={15} /> : <File size={15} />}
-                  <span>{change.targetPath}</span>
-                  <span className="badge proposal-tree-badge">added</span>
-                </button>
-              ))}
-          </div>
-          {selected && (
-            <div className="file-actions">
-              <Button variant="ghost" onClick={() => renameEntry()}>
-                <Pencil size={14} /> Rename
-              </Button>
-              <Button variant="ghost" onClick={() => duplicateEntry()}>
-                <Copy size={14} /> Duplicate
-              </Button>
-              <Button variant="ghost" onClick={() => moveEntry()}>
-                <FolderInput size={14} /> Move
-              </Button>
-              <Button variant="ghost" onClick={() => deleteEntry()}>
-                <Trash2 size={14} /> Delete
-              </Button>
-            </div>
-          )}
-          {virtualFile && activeProposal && canDiscardDraftChange(activeProposal.status) && (
-            <div className="file-actions">
-              <Button
-                variant="ghost"
-                disabled={agentProposal.busy}
-                onClick={() => void agentProposal.discardChange(virtualFile.changeId)}
-              >
-                <Trash2 size={14} /> Discard proposed file
-              </Button>
-            </div>
-          )}
-        </section>
-        <div
-          className={classNames('resizer', !filesVisible && !touchLayout && 'panel-hidden')}
-          onPointerDown={(event) => startResize('tree', event)}
-        />
-        <section
-          className={classNames(
-            'panel editor-panel',
-            projectSearchOpen && 'project-search-open',
-            mobilePanel === 'editor' && 'mobile-active',
-          )}
-        >
-          <div className="tab-bar">
-            {!filesVisible && !touchLayout && (
-              <IconButton
-                className="file-tree-reveal"
-                label="Show file tree"
-                onClick={() => setFilesVisible(true)}
-              >
-                <ChevronRight size={15} />
-              </IconButton>
-            )}
-            {openTabs.map((id) => {
-              if (id === PROJECT_SEARCH_TAB_ID)
-                return (
-                  <button
-                    key={id}
-                    className={classNames('editor-tab', id === selectedId && 'active')}
-                    onClick={() => {
-                      setSelectedId(PROJECT_SEARCH_TAB_ID);
-                      setMobilePanel('editor');
-                    }}
-                  >
-                    <FileSearch size={13} />
-                    <span>Project search results</span>
-                    <X
-                      size={13}
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        closeProjectSearch();
-                      }}
-                    />
-                  </button>
-                );
-              const proposalFile = agentProposal.virtualFiles.find(
-                (file) => `proposal:${file.changeId}` === id,
-              );
-              const entry =
-                entries.find((item) => item.id === id) ??
-                (proposalFile
-                  ? {
-                      id,
-                      projectId,
-                      parentId: null,
-                      name: proposalFile.name,
-                      kind: 'file' as const,
-                      mimeType: 'text/plain',
-                      size: 0,
-                      version: 0,
-                      createdAt: new Date(0).toISOString(),
-                      updatedAt: new Date(0).toISOString(),
-                    }
-                  : null);
-              if (!entry) return null;
-              return (
-                <button
-                  key={id}
-                  className={classNames('editor-tab', id === selectedId && 'active')}
-                  onClick={() => {
-                    if (entry.id.startsWith('proposal:') && proposalFile)
-                      openProposalPath(proposalFile.path);
-                    else void openEntry(entry);
-                  }}
-                >
-                  <File size={13} />
-                  <span>{entry.name}</span>
-                  {saveStates[id] && saveStates[id] !== 'saved' && (
-                    <span
-                      className={`tab-save-state tab-save-state-${saveStates[id]}`}
-                      aria-label={saveStates[id]}
-                    />
-                  )}
-                  <X
-                    size={13}
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      closeTab(id);
-                    }}
-                  />
-                </button>
-              );
-            })}
-            {!previewVisible && !touchLayout && (
-              <IconButton
-                className="preview-reveal"
-                label="Show PDF preview"
-                onClick={() => setPreviewVisible(true)}
-              >
-                <ChevronLeft size={15} />
-              </IconButton>
-            )}
-            {selected?.kind === 'file' && isTextFile(selected.name, selected.mimeType) && (
-              <IconButton
-                className="edit-history-button"
-                label="Undo history"
+          <div className="workspace-side-tabs" role="tablist" aria-label="Project panel">
+            {(['files', 'search', 'outline'] as const).map((tab) => (
+              <button
+                className="ptab"
+                key={tab}
+                role="tab"
+                aria-selected={sideTab === tab}
                 onClick={() => {
-                  void loadEditHistory(selected.id, true);
-                  setEditHistoryOpen(true);
+                  setSideTab(tab);
+                  if (tab === 'search' && !projectSearchOpen) void openProjectSearch();
                 }}
               >
-                <History size={15} />
-              </IconButton>
-            )}
+                {tab}
+              </button>
+            ))}
+            <IconButton
+              className="workspace-fold"
+              label="Hide project panel"
+              onClick={() => setFilesVisible(false)}
+            >
+              <ChevronLeft size={15} strokeWidth={2} />
+            </IconButton>
           </div>
-          {projectSearchOpen && (
+          {sideTab === 'files' && (
+            <>
+              <div className="file-panel-tools">
+                <IconButton label="New file" onClick={() => void createEntry('file')}>
+                  <FilePlus2 size={15} />
+                </IconButton>
+                <IconButton label="New folder" onClick={() => void createEntry('folder')}>
+                  <FolderPlus size={15} />
+                </IconButton>
+                <input ref={uploadRef} hidden type="file" onChange={uploadFile} />
+                <IconButton label="Upload file" onClick={() => uploadRef.current?.click()}>
+                  <Upload size={15} />
+                </IconButton>
+              </div>
+              <div className="file-tree">
+                <FileTree
+                  entries={entries}
+                  proposalChanges={activeProposal?.changes ?? []}
+                  selectedId={selectedId}
+                  onSelect={(entry) => void openEntry(entry)}
+                  onCreate={(kind, entry) => void createEntry(kind, entry)}
+                  onRename={renameEntry}
+                  onDuplicate={duplicateEntry}
+                  onDelete={deleteEntry}
+                  onRequestMove={moveEntry}
+                  onSetMain={(entry) => {
+                    void api(`/api/v1/projects/${projectId}`, {
+                      method: 'PATCH',
+                      body: JSON.stringify({ mainFileId: entry.id }),
+                    }).then(() => projectQuery.refetch());
+                  }}
+                  onMove={(entryId, parentId) =>
+                    mutateEntry.mutate({ id: entryId, method: 'PATCH', body: { parentId } })
+                  }
+                />
+                {activeProposal?.changes
+                  .filter((change) => !change.entryId && change.decision !== 'rejected')
+                  .map((change) => (
+                    <button
+                      type="button"
+                      className="tree-row proposal-added"
+                      key={change.id}
+                      onClick={() => {
+                        if (change.entryKind === 'file' && change.targetPath)
+                          openProposalPath(change.targetPath);
+                      }}
+                    >
+                      {change.entryKind === 'folder' ? <Folder size={15} /> : <File size={15} />}
+                      <span>{change.targetPath}</span>
+                      <span className="badge proposal-tree-badge">added</span>
+                    </button>
+                  ))}
+              </div>
+              {virtualFile && activeProposal && canDiscardDraftChange(activeProposal.status) && (
+                <div className="file-actions">
+                  <Button
+                    variant="ghost"
+                    disabled={agentProposal.busy}
+                    onClick={() => void agentProposal.discardChange(virtualFile.changeId)}
+                  >
+                    <Trash2 size={14} /> Discard proposed file
+                  </Button>
+                </div>
+              )}
+            </>
+          )}
+          {sideTab === 'search' && (
             <ProjectSearchBar
               query={projectSearchQuery}
               replacement={projectSearchReplacement}
@@ -2065,19 +2044,131 @@ export default function WorkspacePage() {
               onClose={closeProjectSearch}
             />
           )}
-          <div className="editor-workspace-stage">
-            {selectedId === PROJECT_SEARCH_TAB_ID && (
-              <ProjectSearchResults
-                query={projectSearchQuery}
-                results={projectSearchResults}
-                sources={projectSearchSources}
-                active={projectSearchActive}
-                loading={projectSearchLoading}
-                failedFiles={projectSearchFailedFiles}
-                onActive={setProjectSearchActive}
-                onOpen={(result) => void openProjectSearchResult(result)}
-              />
+          {sideTab === 'search' && (
+            <ProjectSearchResults
+              query={projectSearchQuery}
+              results={projectSearchResults}
+              sources={projectSearchSources}
+              active={projectSearchActive}
+              loading={projectSearchLoading}
+              failedFiles={projectSearchFailedFiles}
+              onActive={setProjectSearchActive}
+              onReplace={(result) => void replaceProjectResults([result])}
+              onRefresh={() => void openProjectSearch(false)}
+              onClear={() => setProjectSearchQuery('')}
+              onOpen={(result) => void openProjectSearchResult(result)}
+            />
+          )}
+          {sideTab === 'outline' && (
+            <SourceOutline
+              projectId={projectId}
+              sources={outlineSources}
+              mainPath={acceptedMainFile ? (paths.get(acceptedMainFile.id) ?? null) : null}
+              readSymbols={symbolReader}
+              ready={lspStatus === 'ready'}
+              currentPath={selectedPath}
+              cursorLine={cursor.line}
+              undefinedReferences={
+                displayedCompile?.diagnostics.filter((item) =>
+                  /undefined.*reference|reference.*undefined/i.test(item.message),
+                ).length ?? 0
+              }
+              onOpen={(node) => void openOutlineNode(node)}
+            />
+          )}
+        </section>
+        <div
+          className={classNames('resizer', !filesVisible && !touchLayout && 'panel-hidden')}
+          aria-hidden="true"
+        />
+        <section
+          className={classNames('panel editor-panel', mobilePanel === 'editor' && 'mobile-active')}
+        >
+          <div className="tab-bar">
+            {!filesVisible && !touchLayout && (
+              <IconButton
+                className="file-tree-reveal"
+                label="Show file tree"
+                onClick={() => setFilesVisible(true)}
+              >
+                <ChevronRight size={15} />
+              </IconButton>
             )}
+            {openTabs.map((id) => {
+              if (id === PROJECT_SEARCH_TAB_ID) return null;
+              const proposalFile = agentProposal.virtualFiles.find(
+                (file) => `proposal:${file.changeId}` === id,
+              );
+              const entry =
+                entries.find((item) => item.id === id) ??
+                (proposalFile
+                  ? {
+                      id,
+                      projectId,
+                      parentId: null,
+                      name: proposalFile.name,
+                      kind: 'file' as const,
+                      mimeType: 'text/plain',
+                      size: 0,
+                      version: 0,
+                      createdAt: new Date(0).toISOString(),
+                      updatedAt: new Date(0).toISOString(),
+                    }
+                  : null);
+              if (!entry) return null;
+              return (
+                <div key={id} className="editor-tab-group">
+                  <button
+                    type="button"
+                    aria-selected={id === selectedId}
+                    className="etab"
+                    onClick={() => {
+                      if (entry.id.startsWith('proposal:') && proposalFile)
+                        openProposalPath(proposalFile.path);
+                      else void openEntry(entry);
+                    }}
+                  >
+                    <span>{entry.name}</span>
+                    {saveStates[id] && saveStates[id] !== 'saved' && (
+                      <span
+                        className={`tab-save-state tab-save-state-${saveStates[id]}`}
+                        aria-label={saveStates[id]}
+                      />
+                    )}
+                  </button>
+                  <IconButton
+                    className="tb-compact editor-tab-close"
+                    label={`Close ${entry.name}`}
+                    onClick={() => closeTab(id)}
+                  >
+                    <X size={12} />
+                  </IconButton>
+                </div>
+              );
+            })}
+            {!previewVisible && !touchLayout && (
+              <IconButton
+                className="preview-reveal"
+                label="Show PDF preview"
+                onClick={() => setPreviewVisible(true)}
+              >
+                <ChevronLeft size={15} />
+              </IconButton>
+            )}
+            {selected?.kind === 'file' && isTextFile(selected.name, selected.mimeType) && (
+              <IconButton
+                className="edit-history-button"
+                label="Undo history"
+                onClick={() => {
+                  void loadEditHistory(selected.id, true);
+                  setEditHistoryOpen(true);
+                }}
+              >
+                <History size={15} />
+              </IconButton>
+            )}
+          </div>
+          <div className="editor-workspace-stage">
             {activeEditorEntry && activeEditorContent && (
               <div
                 className={classNames(
@@ -2149,6 +2240,7 @@ export default function WorkspacePage() {
                     if (autoCompileTarget.current) noteAutoCompileActivity();
                   }}
                   onLanguageStatus={setLspStatus}
+                  onRegisterDocumentSymbols={(reader) => setSymbolReader(() => reader)}
                   onSaveState={(entryId, state) =>
                     setSaveStates((value) => ({ ...value, [entryId]: state }))
                   }
@@ -2249,7 +2341,7 @@ export default function WorkspacePage() {
               <FileImage size={44} />
               <h3>No PDF yet</h3>
               <p>Compile the project to render a preview.</p>
-              <Button variant="primary" onClick={requestManualCompile}>
+              <Button onClick={requestManualCompile}>
                 <Play size={15} /> Compile
               </Button>
             </div>
@@ -2278,35 +2370,46 @@ export default function WorkspacePage() {
         </section>
       </div>
       <footer className="statusbar">
-        <span className={lspStatus === 'ready' ? 'status-ok' : ''}>
-          {lspStatus === 'ready'
-            ? 'TexLab ready'
-            : lspStatus === 'failed'
-              ? 'TexLab failed'
-              : lspStatus === 'reconnecting'
-                ? 'TexLab reconnecting'
-                : 'TexLab connecting'}
+        <span className="workspace-language-status" title={`TexLab ${lspStatus}`}>
+          <span
+            className="dot"
+            data-tone={lspStatus === 'ready' ? undefined : lspStatus === 'failed' ? 'bad' : 'warn'}
+          />
+          TexLab
+        </span>
+        <span>
+          Ln {cursor.line}, Col {cursor.column}
+        </span>
+        <span>
+          {payload.project.compiler === 'pdflatex'
+            ? 'pdfLaTeX'
+            : payload.project.compiler === 'xelatex'
+              ? 'XeLaTeX'
+              : 'LuaLaTeX'}
         </span>
         {selectedId && saveStates[selectedId] && saveStates[selectedId] !== 'saved' && (
           <span className={`save-status save-status-${saveStates[selectedId]}`}>
             {saveStates[selectedId]}
           </span>
         )}
-        {successfulCompile && successfulCompile.sourceRevision < payload.project.sourceRevision && (
-          <span className="save-status save-status-stale">PDF out of date</span>
-        )}
-        <span>
-          Ln {cursor.line}, Col {cursor.column}
-        </span>
-        <span>{payload.project.compiler}</span>
-        <span className="right">Revision {payload.project.sourceRevision}</span>
         <button
-          className="icon-button"
+          className="tb workspace-warning-count"
+          onClick={() => {
+            setBottomTab('problems');
+            setProblemsOpen((value) => !value);
+          }}
+          title="Open Problems"
+        >
+          {displayedCompile?.diagnostics.filter((item) => item.severity === 'warning').length ?? 0}{' '}
+          warnings
+        </button>
+        <span>Revision {payload.project.sourceRevision}</span>
+        <IconButton
+          label={problemsOpen ? 'Hide Problems and Logs' : 'Show Problems and Logs'}
           onClick={() => setProblemsOpen((value) => !value)}
-          aria-label="Toggle Problems panel"
         >
           {problemsOpen ? <PanelBottomClose size={14} /> : <PanelBottomOpen size={14} />}
-        </button>
+        </IconButton>
       </footer>
       <HistoryDialog
         open={historyOpen}
@@ -2327,13 +2430,6 @@ export default function WorkspacePage() {
         history={selected ? editHistories[selected.id] : undefined}
         onCheckout={(nodeId) => void checkoutEditHistory(nodeId)}
         onLoadMore={() => (selected ? loadMoreEditHistory(selected.id) : undefined)}
-      />
-      <AccountSettingsDialog
-        open={accountSettings !== null}
-        onOpenChange={(open) => {
-          if (!open) setAccountSettings(null);
-        }}
-        initialSection={accountSettings ?? 'account'}
       />
       <Dialog
         open={Boolean(entryDialog)}
@@ -2433,6 +2529,16 @@ export default function WorkspacePage() {
         onOpenChange={setPaletteOpen}
         query={paletteQuery}
         onQuery={setPaletteQuery}
+        autoCompile={autoCompileEnabled}
+        onAutoCompileChange={(value) => void setAutoCompile(value)}
+        compiler={payload.project.compiler}
+        onCompiler={() => projectSettingsRef.current?.open('project')}
+        textResults={projectSearchResults}
+        onTextQuery={(value) => {
+          if (value && !projectSearchOpen) void openProjectSearch(false, false);
+          setProjectSearchQuery(value);
+        }}
+        onOpenText={(result) => void openProjectSearchResult(result)}
         commands={[
           ...shortcutRegistry.map((item) => ({
             label:
@@ -2449,13 +2555,15 @@ export default function WorkspacePage() {
                       ? 'Hide Problems and Logs'
                       : 'Show Problems and Logs'
                     : item.label,
-            ...(shortcuts[item.id] ? { shortcut: displayShortcut(shortcuts[item.id]) } : {}),
+            ...(shortcuts[item.id] ? { shortcut: shortcutHint(shortcuts[item.id]) } : {}),
             run: () => runShortcut(item.id),
           })),
           ...entries
             .filter((entry) => entry.kind === 'file')
             .map((entry) => ({
-              label: `Open ${paths.get(entry.id)}`,
+              kind: 'file' as const,
+              path: paths.get(entry.id)?.split('/').slice(0, -1).join('/') ?? '',
+              label: `Open ${entry.name}`,
               run: () => void openEntry(entry),
             })),
         ]}
@@ -2523,88 +2631,6 @@ export default function WorkspacePage() {
       </Dialog>
       {toast && <Toast toast={toast} dismiss={() => setToast(null)} />}
     </main>
-  );
-}
-
-type PaletteCommand = { label: string; shortcut?: string | undefined; run: () => void };
-
-function CommandPalette({
-  open,
-  onOpenChange,
-  query,
-  onQuery,
-  commands,
-}: {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  query: string;
-  onQuery: (value: string) => void;
-  commands: PaletteCommand[];
-}) {
-  const [active, setActive] = useState(0);
-  const filtered = commands
-    .filter((command) => command.label.toLocaleLowerCase().includes(query.toLocaleLowerCase()))
-    .slice(0, 14);
-  useEffect(() => setActive(0), [query, open]);
-  const execute = (command: PaletteCommand | undefined) => {
-    if (!command) return;
-    onOpenChange(false);
-    command.run();
-  };
-  return (
-    <Dialog
-      open={open}
-      onOpenChange={onOpenChange}
-      title="Command palette"
-      description="Run a workspace action or switch files."
-    >
-      <div className="command-palette">
-        <label className="searchbox">
-          <Command size={16} />
-          <span className="sr-only">Search commands</span>
-          <input
-            autoFocus
-            className="input"
-            value={query}
-            onChange={(event) => onQuery(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === 'ArrowDown') {
-                event.preventDefault();
-                setActive((value) => Math.min(filtered.length - 1, value + 1));
-              }
-              if (event.key === 'ArrowUp') {
-                event.preventDefault();
-                setActive((value) => Math.max(0, value - 1));
-              }
-              if (event.key === 'Enter') {
-                event.preventDefault();
-                execute(filtered[active]);
-              }
-            }}
-            placeholder="Type a command or file name…"
-          />
-        </label>
-        <div className="command-results" role="listbox" aria-label="Commands">
-          {filtered.length ? (
-            filtered.map((command, index) => (
-              <button
-                key={`${command.label}-${index}`}
-                role="option"
-                aria-selected={active === index}
-                className={active === index ? 'active' : ''}
-                onMouseEnter={() => setActive(index)}
-                onClick={() => execute(command)}
-              >
-                <span>{command.label}</span>
-                {command.shortcut && <kbd>{command.shortcut}</kbd>}
-              </button>
-            ))
-          ) : (
-            <p className="hint">No matching commands.</p>
-          )}
-        </div>
-      </div>
-    </Dialog>
   );
 }
 
@@ -2790,7 +2816,7 @@ function ProblemsPanel({
         >
           Problems ({job?.diagnostics.length ?? 0})
         </button>
-        <button className={activeTab === 'logs' ? 'active' : ''} onClick={() => onTab('logs')}>
+        <button className="ptab" aria-selected={activeTab === 'logs'} onClick={() => onTab('logs')}>
           Compiler log
         </button>
       </div>
@@ -2798,7 +2824,7 @@ function ProblemsPanel({
         <pre className="compile-log">{job?.log || 'Compile the project to see its log.'}</pre>
       ) : job?.diagnostics.length ? (
         job.diagnostics.map((diagnostic, index) => (
-          <div
+          <button
             key={index}
             className={`diagnostic diagnostic-${diagnostic.severity}`}
             onClick={() => onDiagnostic(diagnostic)}
@@ -2809,7 +2835,7 @@ function ProblemsPanel({
               {diagnostic.file ?? 'main document'}
               {diagnostic.line ? `:${diagnostic.line}` : ''}
             </small>
-          </div>
+          </button>
         ))
       ) : (
         <p className="hint" style={{ padding: 12 }}>
@@ -3029,10 +3055,10 @@ function buildWorkspaceColumns(
 ) {
   const columns: string[] = [];
   if (filesVisible) {
-    columns.push(`minmax(0, ${treeWidth}px)`, '5px');
+    columns.push(`minmax(0, ${treeWidth}px)`, '1px');
   }
   if (previewVisible) {
-    columns.push(`minmax(0, ${editorWidth}px)`, '5px', 'minmax(0, 1fr)');
+    columns.push(`minmax(0, ${editorWidth}px)`, '1px', 'minmax(0, 1fr)');
   } else {
     columns.push('minmax(0, 1fr)');
   }
@@ -3076,13 +3102,13 @@ function readWorkspacePreferences(projectId: string): WorkspacePreferences {
   const defaults: WorkspacePreferences = {
     openTabs: [],
     selectedId: null,
-    problemsOpen: true,
+    problemsOpen: false,
     mobilePanel: 'editor',
     filesVisible: true,
     previewVisible: true,
-    treeWidth: viewport < 1100 ? 200 : 240,
+    treeWidth: 272,
     // Keep editor + preview both usable on iPad-class widths without a fake 1280 viewport.
-    editorWidth: viewport < 1100 ? Math.max(300, Math.floor(viewport * 0.42)) : 620,
+    editorWidth: Math.max(280, Math.floor((viewport - 274) / 2)),
   };
   try {
     const value = JSON.parse(localStorage.getItem(`workspace:${projectId}`) ?? 'null') as Partial<
