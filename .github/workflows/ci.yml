@@ -46,6 +46,8 @@ jobs:
       - run: docker compose up -d --build
       - name: Wait for application
         run: timeout 240 sh -c 'until curl -fsS http://localhost:3001/health/ready && curl -fsS http://localhost:5173; do sleep 3; done'
+      # The specs import runtime schemas from this package.
+      - run: pnpm --filter @latex-workshop/contracts build
       - run: pnpm test:e2e
       - if: always()
         run: docker compose logs --no-color > docker-compose.log
