@@ -14,23 +14,25 @@ import {
 import { IconButton } from '@latex-workshop/ui';
 import { api } from '../../lib/api';
 import {
-  sourceIncludes,
-  mergeIncludedOutline,
+  buildOutline,
+  includeCandidates,
+  localPackagePaths,
   numberOutline,
-  symbolsToOutline,
+  preambleOf,
+  rawIncludes,
+  scanOutline,
   type OutlineNode,
-  type SourceSymbol,
 } from './outlineModel';
+import { collectMacros, emptyMacroTable } from './latexMacros';
 import './outline.css';
 
-export type DocumentSymbolReader = (path: string) => Promise<SourceSymbol[]>;
 type OutlineSource = { entryId: string; path: string; content?: string; version: number };
+const MAX_FILES = 256;
+
 export function SourceOutline({
   projectId,
   sources,
   mainPath,
-  readSymbols,
-  ready,
   currentPath,
   cursorLine,
   undefinedReferences,
@@ -39,8 +41,6 @@ export function SourceOutline({
   projectId: string;
   sources: OutlineSource[];
   mainPath: string | null;
-  readSymbols: DocumentSymbolReader | null;
-  ready: boolean;
   currentPath: string | null;
   cursorLine: number;
   undefinedReferences: number;
@@ -54,39 +54,67 @@ export function SourceOutline({
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const activeRef = useRef<HTMLButtonElement | null>(null);
   useEffect(() => {
-    if (!ready || !readSymbols || !mainPath) return;
+    if (!mainPath) return;
     let cancelled = false;
     const timer = window.setTimeout(() => {
       setLoading(true);
       setFailed(false);
       const run = async () => {
-        const visited = new Set<string>();
         const byPath = new Map(sources.map((source) => [source.path, source]));
-        const load = async (path: string): Promise<OutlineNode[]> => {
-          if (cancelled || visited.has(path) || visited.size >= 256) return [];
+        const cache = new Map<string, Promise<string>>();
+        const read = (path: string) => {
           const source = byPath.get(path);
-          if (!source) return [];
-          visited.add(path);
+          if (!source) return null;
+          const cached = cache.get(path);
+          if (cached) return cached;
           const content =
-            source.content ??
-            (
-              await api<{ content: string }>(
-                `/api/v1/projects/${projectId}/entries/${source.entryId}/content`,
-              )
-            ).content;
-          const symbols = await readSymbols(path);
-          const own = symbolsToOutline(path, content, symbols);
-          const included = await Promise.all(
-            sourceIncludes(path, content).map(async (include) => ({
-              line: include.line,
-              nodes: await load(include.path),
-            })),
-          );
-          return mergeIncludedOutline(own, included);
+            source.content !== undefined
+              ? Promise.resolve(source.content)
+              : api<{ content: string }>(
+                  `/api/v1/projects/${projectId}/entries/${source.entryId}/content`,
+                ).then((body) => body.content);
+          cache.set(path, content);
+          return content;
+        };
+        const locate = (from: string, target: string) =>
+          includeCandidates(mainPath, from, target).find((path) => byPath.has(path));
+        const macros = emptyMacroTable();
+        const defined = new Set<string>();
+        // Dependencies load first so a document's own \renewcommand wins, as it would in TeX.
+        const define = async (path: string): Promise<void> => {
+          const pending = read(path);
+          if (cancelled || !pending || defined.has(path) || defined.size >= MAX_FILES) return;
+          defined.add(path);
+          const content = await pending;
+          const preamble = preambleOf(content);
+          const targets = [
+            ...rawIncludes(preamble).map(({ target }) => locate(path, target)),
+            ...localPackagePaths(preamble).map((target) => locate(path, target)),
+          ];
+          for (const target of targets) if (target) await define(target);
+          collectMacros(preamble, macros);
+        };
+        await define(mainPath);
+        const visited = new Set<string>();
+        const walk = async (path: string): Promise<OutlineNode[]> => {
+          const pending = read(path);
+          if (cancelled || !pending || visited.has(path) || visited.size >= MAX_FILES) return [];
+          visited.add(path);
+          const content = await pending;
+          if (path !== mainPath) await define(path);
+          const flat: OutlineNode[] = [];
+          for (const event of scanOutline(path, content, macros)) {
+            if (event.type === 'node') flat.push(event.node);
+            else {
+              const target = locate(path, event.target);
+              if (target) flat.push(...(await walk(target)));
+            }
+          }
+          return flat;
         };
         try {
-          const result = await load(mainPath);
-          if (!cancelled) setNodes(numberOutline(result));
+          const flat = await walk(mainPath);
+          if (!cancelled) setNodes(numberOutline(buildOutline(flat)));
         } catch {
           if (!cancelled) setFailed(true);
         } finally {
@@ -99,7 +127,7 @@ export function SourceOutline({
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [mainPath, projectId, readSymbols, ready, sources]);
+  }, [mainPath, projectId, sources]);
   const flat = useMemo(() => {
     const all: OutlineNode[] = [];
     const visit = (items: OutlineNode[]) => {
@@ -179,7 +207,7 @@ export function SourceOutline({
               <button
                 className="tr outline-row"
                 aria-current={selected ? 'true' : undefined}
-                title={`${node.path} : ${node.line}`}
+                title={`${node.name}${node.detail ? ` ${node.detail}` : ''} · ${node.path} : ${node.line}`}
                 ref={selected ? activeRef : undefined}
                 onClick={() => onOpen(node)}
               >
@@ -191,8 +219,9 @@ export function SourceOutline({
                 <span className="outline-name">
                   {node.name}
                   {node.number && node.category !== 'section' ? ` ${node.number}` : ''}
+                  {node.detail && <span className="outline-detail"> {node.detail}</span>}
                 </span>
-                {node.label && node.label !== node.name && <code>{node.label}</code>}
+                {node.label && <code>{node.label}</code>}
                 {depth === 0 && <span className="outline-file">{node.path.split('/').pop()}</span>}
               </button>
             </div>
@@ -245,7 +274,7 @@ export function SourceOutline({
           <p className="outline-empty">Outline unavailable</p>
         ) : !nodes.length ? (
           <p className="outline-empty">
-            <ListTree size={16} /> {ready ? 'No source symbols' : 'Connecting to TexLab…'}
+            <ListTree size={16} /> No sections or labels yet
           </p>
         ) : (
           render(nodes)

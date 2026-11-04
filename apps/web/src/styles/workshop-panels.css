@@ -218,32 +218,45 @@
   font-size: 11.5px;
 }
 .project-find-bar {
-  padding: 10px 10px 0 6px;
+  padding: 12px 12px 10px 8px;
   min-width: 0;
   overflow: hidden;
 }
 .project-find-row {
   display: flex;
   align-items: center;
-  gap: 0;
+  gap: 6px;
   min-width: 0;
 }
+.project-find-row > .ib {
+  flex: none;
+  width: 24px;
+  height: 24px;
+  min-width: 24px;
+  color: var(--hon-muted);
+}
+.project-find-row > .ib[aria-expanded='true'] {
+  background: transparent;
+  color: var(--hon-text);
+}
+.project-find-row > .ib:hover {
+  background: var(--hon-editor);
+}
 .project-find-spacer {
-  flex: 0 0 22px;
-  min-width: 22px;
-  padding: 0;
-  width: 22px;
+  flex: 0 0 24px;
+  width: 24px;
 }
 .project-find-input {
   display: flex;
   align-items: center;
+  gap: 2px;
   min-width: 0;
-  height: 30px;
+  height: 32px;
   flex: 1;
   background: var(--hon-inset);
   border: 1px solid var(--hon-border);
   border-radius: var(--r-sm);
-  padding: 0 4px 0 10px;
+  padding: 0 4px 0 11px;
 }
 .project-find-input:focus-within {
   border-color: var(--hon-focus);
@@ -255,6 +268,7 @@
   width: 0;
   min-width: 0;
   flex: 1;
+  margin-right: 6px;
   padding: 0;
   background: transparent;
   border: 0;
@@ -264,7 +278,15 @@
 }
 
 .project-replace-row {
-  margin-top: 6px;
+  margin-top: 8px;
+}
+.project-find-input > .ib,
+.project-find-input > .tb-xs {
+  flex: none;
+  width: 24px;
+  height: 24px;
+  min-width: 24px;
+  padding: 0;
 }
 .search-whole-word {
   text-decoration: underline;
@@ -436,7 +458,7 @@
   gap: 4px;
   padding: 0 8px;
   border-bottom: 1px solid var(--hon-border);
-  background: var(--hon-terminal);
+  background: var(--hon-app);
   min-width: 0;
 }
 .pdf-page-controls,

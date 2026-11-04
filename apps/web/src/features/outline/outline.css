@@ -95,3 +95,6 @@
   font-variant-numeric: tabular-nums;
   flex: none;
 }
+.outline-detail {
+  color: var(--hon-muted);
+}

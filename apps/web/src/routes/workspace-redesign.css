@@ -3,7 +3,7 @@
   min-height: 0;
   display: grid;
   grid-template-rows: 52px minmax(0, 1fr) 29px;
-  background: var(--hon-terminal);
+  background: var(--hon-app);
   overflow: hidden;
 }
 .workspace-toolbar {
@@ -13,7 +13,7 @@
   padding: 0 10px;
   border-bottom: 1px solid var(--hon-border);
   min-width: 0;
-  background: var(--hon-terminal);
+  background: var(--hon-app);
 }
 .workspace-mark {
   width: 24px;
@@ -48,7 +48,7 @@
 }
 .workspace-compile-status {
   flex: none;
-  background: var(--hon-app);
+  background: var(--hon-editor);
   font-size: 12.5px;
   letter-spacing: 0.028em;
   white-space: nowrap;
@@ -135,7 +135,7 @@
 .file-panel {
   display: flex;
   flex-direction: column;
-  background: var(--hon-terminal);
+  background: var(--hon-app);
   min-width: 0;
   overflow: hidden;
 }
@@ -226,7 +226,7 @@
   align-items: stretch;
   min-width: 0;
   overflow-x: auto;
-  background: var(--hon-terminal);
+  background: var(--hon-app);
   border-bottom: 1px solid var(--hon-border);
 }
 .editor-tab-group {
@@ -348,7 +348,7 @@
 .problems-panel {
   max-height: 220px;
   overflow: auto;
-  background: var(--hon-terminal);
+  background: var(--hon-app);
   border-top: 1px solid var(--hon-border);
 }
 .problems-tabs {
@@ -488,4 +488,9 @@
   .statusbar > .save-status {
     display: none;
   }
+}
+/* Shared rows hover to the app colour, which is this panel's own ground. */
+.file-panel .tr:hover,
+.source-outline .tr:hover {
+  background: var(--hon-editor);
 }

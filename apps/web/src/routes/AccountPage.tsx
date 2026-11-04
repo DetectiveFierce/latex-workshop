@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
+import { clearThumbnails } from '../lib/thumbnailCache';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from '@tanstack/react-router';
 import {
@@ -194,6 +195,7 @@ export function AccountSettingsContent({
             <Button
               onClick={async () => {
                 await authClient.signOut();
+                await clearThumbnails();
                 onClose?.();
                 await navigate({ to: '/auth' });
               }}

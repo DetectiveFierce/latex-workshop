@@ -251,6 +251,7 @@
   flex-wrap: wrap;
 }
 .library-heading h1 {
+  letter-spacing: 0.004em;
   white-space: nowrap;
 }
 .library-heading-count {
@@ -329,17 +330,13 @@
   display: grid;
   place-items: center;
 }
-.project-thumbnail canvas {
+.project-thumbnail img {
   position: absolute;
   top: 0;
   left: 0;
   width: 100%;
   height: auto;
   background: var(--hon-paper);
-  opacity: 0;
-}
-.project-thumbnail.loaded canvas {
-  opacity: 1;
 }
 .project-thumbnail-placeholder {
   display: grid;

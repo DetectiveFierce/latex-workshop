@@ -1,5 +1,4 @@
 import type * as Monaco from 'monaco-editor';
-import type { SourceSymbol } from '../outline/outlineModel';
 import { appPath } from '../../lib/api';
 
 type JsonRpc = {
@@ -232,32 +231,6 @@ export class TexLabClient {
         textDocument: { uri: model.uri.toString() },
         text,
       });
-  }
-
-  /** Reuse this editor's authenticated project session for the source outline. */
-  async documentSymbols(path: string): Promise<SourceSymbol[]> {
-    if (!this.ready || this.disposed) return [];
-    const uri = this.monaco.Uri.file(`/workspace/${path}`).toString();
-    const response = await this.request('textDocument/documentSymbol', { textDocument: { uri } });
-    let remaining = 5000;
-    const convert = (value: unknown, depth = 0): SourceSymbol[] => {
-      if (remaining-- <= 0 || depth >= 64 || !isLspDocumentSymbol(value)) return [];
-      const range = value.range ?? value.location?.range;
-      if (!range) return [];
-      return [
-        {
-          name: value.name,
-          detail: value.detail ?? '',
-          kind: value.kind ?? 15,
-          line: range.start.line + 1,
-          endLine: range.end.line + 1,
-          children: (Array.isArray(value.children) ? value.children : []).flatMap((child) =>
-            convert(child, depth + 1),
-          ),
-        },
-      ];
-    };
-    return (Array.isArray(response) ? response : []).flatMap((value) => convert(value));
   }
 
   private registerProviders() {

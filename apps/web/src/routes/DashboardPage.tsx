@@ -295,7 +295,7 @@ export function DashboardPage() {
         (folderPath.get(folder.id) ?? folder.name).toLocaleLowerCase().includes(normalized),
       );
     }
-    if (view === 'all') return [];
+    if (view === 'all') return activeFolders.filter((folder) => !folder.parentId);
     if (view === 'folder')
       return activeFolders.filter((folder) => folder.parentId === currentFolder?.id);
     if (view === 'trash') {
@@ -648,7 +648,7 @@ export function DashboardPage() {
               ? 'Recent'
               : view === 'trash'
                 ? 'Trash'
-                : 'All projects';
+                : 'All Projects';
 
   return (
     <DndContext

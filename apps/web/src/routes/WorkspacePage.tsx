@@ -90,7 +90,7 @@ import { api, appPath, queryKeys } from '../lib/api';
 import { authClient } from '../lib/auth';
 import { prefersTouchWorkspace, TOUCH_WORKSPACE_MEDIA } from '../lib/layout';
 import { projectDocumentTitle } from '../lib/document-title';
-import { SourceOutline, type DocumentSymbolReader } from '../features/outline/SourceOutline';
+import { SourceOutline } from '../features/outline/SourceOutline';
 import type { OutlineNode } from '../features/outline/outlineModel';
 import { CompileControl } from '../features/workspace/CompileControl';
 import { VersionMenu } from '../features/workspace/VersionMenu';
@@ -170,7 +170,6 @@ export default function WorkspacePage() {
   const [editHistories, setEditHistories] = useState<Record<string, EditHistoryResponse>>({});
   const projectSettingsRef = useRef<ProjectSettingsControlHandle>(null);
   const [sideTab, setSideTab] = useState<'files' | 'search' | 'outline'>('files');
-  const [symbolReader, setSymbolReader] = useState<DocumentSymbolReader | null>(null);
   const [conflictState, setConflictState] = useState<{
     entryId: string;
     local: string;
@@ -1663,7 +1662,7 @@ export default function WorkspacePage() {
   const outlineSources = useMemo(
     () =>
       entries
-        .filter((entry) => entry.kind === 'file' && entry.name.endsWith('.tex'))
+        .filter((entry) => entry.kind === 'file' && /\.(?:tex|sty|cls)$/.test(entry.name))
         .map((entry) => {
           const cached = contents[entry.id];
           return {
@@ -2064,8 +2063,6 @@ export default function WorkspacePage() {
               projectId={projectId}
               sources={outlineSources}
               mainPath={acceptedMainFile ? (paths.get(acceptedMainFile.id) ?? null) : null}
-              readSymbols={symbolReader}
-              ready={lspStatus === 'ready'}
               currentPath={selectedPath}
               cursorLine={cursor.line}
               undefinedReferences={
@@ -2240,7 +2237,6 @@ export default function WorkspacePage() {
                     if (autoCompileTarget.current) noteAutoCompileActivity();
                   }}
                   onLanguageStatus={setLspStatus}
-                  onRegisterDocumentSymbols={(reader) => setSymbolReader(() => reader)}
                   onSaveState={(entryId, state) =>
                     setSaveStates((value) => ({ ...value, [entryId]: state }))
                   }

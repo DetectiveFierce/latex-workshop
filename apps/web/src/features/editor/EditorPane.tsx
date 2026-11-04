@@ -21,7 +21,6 @@ import {
 import { syncProposalOverlay } from '../agent-proposals/proposalEditorDecorations';
 import { registerLatexLanguage, languageFor } from './latexLanguage';
 import { TexLabClient, type TexLabStatus } from './lspClient';
-import type { DocumentSymbolReader } from '../outline/SourceOutline';
 
 self.MonacoEnvironment = {
   getWorker: () => new MonacoEditorWorker(),
@@ -93,7 +92,6 @@ export function EditorPane({
   onRegisterFocus,
   onRegisterShortcutRunner,
   onRegisterViewport,
-  onRegisterDocumentSymbols,
   onSourceLocate,
   onSaveState,
   shortcuts,
@@ -138,7 +136,6 @@ export function EditorPane({
   onRegisterFocus?: (focus: () => void) => void;
   onRegisterShortcutRunner?: (run: (action: ShortcutActionId) => void) => void;
   onRegisterViewport?: (capture: () => EditorViewportSnapshot | null) => void;
-  onRegisterDocumentSymbols?: (read: DocumentSymbolReader) => void;
   onSourceLocate?: (selection: {
     start: { line: number; column: number };
     end: { line: number; column: number };
@@ -596,8 +593,6 @@ export function EditorPane({
     if (!lspRef.current) {
       lspRef.current = new TexLabClient(monaco, projectId, onLanguageStatus);
       lspRef.current.connect();
-      const client = lspRef.current;
-      onRegisterDocumentSymbols?.((path) => client.documentSymbols(path));
     }
     const model = editor.getModel();
     controllers.current.get(entry.id)!.selection = snapshotSelections(editor.getSelections());

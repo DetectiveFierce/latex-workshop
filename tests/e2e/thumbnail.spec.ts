@@ -55,6 +55,15 @@ test('Library creates missing thumbnails in the background with auto compile dis
   const card = page.locator('.library-project-card').filter({ hasText: name });
   await expect(card).toBeVisible();
   await expect(card.locator('.project-thumbnail')).toHaveClass(/loaded/, { timeout: 240_000 });
+
+  // Previews persist: coming back to the library shows them without fetching the PDF again.
+  let pdfRequests = 0;
+  page.on('request', (sent) => {
+    if (/\/compilations\/[^/]+\/pdf/.test(sent.url())) pdfRequests += 1;
+  });
+  await page.reload();
+  await expect(card.locator('.project-thumbnail')).toHaveClass(/loaded/, { timeout: 10_000 });
+  expect(pdfRequests).toBe(0);
   expect(browserCompileRequests).toBe(0);
   const detail = (await (await page.request.get(`api/v1/projects/${project.id}`)).json()) as {
     project: { autoCompile: boolean };

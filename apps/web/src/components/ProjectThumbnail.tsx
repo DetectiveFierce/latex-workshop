@@ -1,6 +1,15 @@
 import { useEffect, useRef, useState } from 'react';
 import { FileCode2 } from 'lucide-react';
-import { appPath } from '../lib/api';
+import {
+  loadThumbnail,
+  peekThumbnail,
+  saveThumbnail,
+  type VisibleThumbnail,
+} from '../lib/thumbnailCache';
+import { renderThumbnail } from '../lib/thumbnailRenderer';
+
+/** A cached preview slightly under the card's resolution still looks sharp and saves a render. */
+const ACCEPTABLE_SCALE = 0.75;
 
 export function ProjectThumbnail({
   projectId,
@@ -12,15 +21,23 @@ export function ProjectThumbnail({
   generate?: number;
 }) {
   const hostRef = useRef<HTMLDivElement>(null);
-  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const [thumbnail, setThumbnail] = useState<VisibleThumbnail | null>(() =>
+    peekThumbnail(projectId),
+  );
   const [visible, setVisible] = useState(false);
-  const [loaded, setLoaded] = useState(false);
   const [failed, setFailed] = useState(false);
 
   useEffect(() => {
-    setLoaded(false);
     setFailed(false);
-  }, [jobId]);
+    let cancelled = false;
+    setThumbnail(peekThumbnail(projectId));
+    void loadThumbnail(projectId).then((cached) => {
+      if (!cancelled && cached) setThumbnail(cached);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId]);
 
   useEffect(() => {
     if (jobId && generate > 0) setVisible(true);
@@ -37,57 +54,45 @@ export function ProjectThumbnail({
     return () => observer.disconnect();
   }, [jobId]);
 
+  const shown = thumbnail?.jobId ?? null;
+  const shownWidth = thumbnail?.width ?? 0;
   useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!visible || !jobId || !canvas) return;
+    const host = hostRef.current;
+    if (!visible || !jobId || !host) return;
+    const cssWidth = Math.max(240, host.clientWidth);
+    const pixelWidth = Math.round(cssWidth * Math.min(window.devicePixelRatio || 1, 2));
+    if (shown === jobId && shownWidth >= pixelWidth * ACCEPTABLE_SCALE) return;
+    // The stored preview stays on screen until its replacement is ready.
     let cancelled = false;
-    let destroy: (() => Promise<void>) | undefined;
+    const background = getComputedStyle(host).getPropertyValue('--hon-paper').trim();
     void (async () => {
-      const [pdfjs, worker] = await Promise.all([
-        import('pdfjs-dist'),
-        import('pdfjs-dist/build/pdf.worker.min.mjs?url'),
-      ]);
+      const cached = await loadThumbnail(projectId);
       if (cancelled) return;
-      pdfjs.GlobalWorkerOptions.workerSrc = worker.default;
-      const loadingTask = pdfjs.getDocument({
-        url: appPath(`/api/v1/projects/${projectId}/compilations/${jobId}/pdf`),
-        withCredentials: true,
-      });
-      destroy = () => loadingTask.destroy();
-      const document = await loadingTask.promise;
-      const page = await document.getPage(1);
-      if (cancelled) return;
-      const base = page.getViewport({ scale: 1 });
-      const cssWidth = Math.max(240, hostRef.current?.clientWidth ?? 320);
-      const pixelRatio = Math.min(window.devicePixelRatio || 1, 2);
-      const viewport = page.getViewport({ scale: (cssWidth / base.width) * pixelRatio });
-      const context = canvas.getContext('2d', { alpha: false });
-      if (!context) return;
-      canvas.width = Math.floor(viewport.width);
-      canvas.height = Math.floor(viewport.height);
-      await page.render({
-        canvas,
-        canvasContext: context,
-        viewport,
-        background: getComputedStyle(hostRef.current ?? canvas)
-          .getPropertyValue('--hon-paper')
-          .trim(),
-      }).promise;
-      if (!cancelled) setLoaded(true);
-      await document.cleanup();
+      if (cached?.jobId === jobId && cached.width >= pixelWidth * ACCEPTABLE_SCALE) {
+        setThumbnail(cached);
+        return;
+      }
+      const rendered = await renderThumbnail(
+        projectId,
+        jobId,
+        pixelWidth,
+        background,
+        () => !cancelled,
+      );
+      if (cancelled || !rendered) return;
+      setThumbnail(await saveThumbnail(projectId, jobId, rendered.blob, rendered.width));
     })().catch((error: unknown) => {
       if (!cancelled) {
         console.warn('Could not render project preview', error);
-        setLoaded(false);
         setFailed(true);
       }
     });
     return () => {
       cancelled = true;
-      void destroy?.();
     };
-  }, [jobId, projectId, visible]);
+  }, [jobId, projectId, shown, shownWidth, visible]);
 
+  const loaded = Boolean(thumbnail);
   return (
     <div ref={hostRef} className={`project-thumbnail${loaded ? ' loaded' : ''}`}>
       <div className="project-thumbnail-placeholder">
@@ -100,7 +105,7 @@ export function ProjectThumbnail({
               : 'Preview pending'}
         </span>
       </div>
-      {jobId && <canvas ref={canvasRef} aria-hidden="true" />}
+      {thumbnail && <img src={thumbnail.url} alt="" draggable={false} />}
     </div>
   );
 }
