@@ -24,9 +24,12 @@ compose() {
   docker compose --env-file "$env_file" -f "$compose_file" "$@"
 }
 
+# Resume the stopped containers; never `up` them. This file lists only the base
+# Compose recipe, so `up` would recreate writers on its image tags and silently
+# undo the exact images the central deployment pipeline activated.
 cleanup() {
   if [ "$stopped" = true ]; then
-    compose up -d api language-service compile-worker >/dev/null 2>&1 || true
+    compose start api language-service compile-worker >/dev/null 2>&1 || true
   fi
   rm -rf "$stage_dir"/*
   rm -f "$partial"
@@ -56,7 +59,7 @@ if ! wait "$object_backup_pid"; then
 fi
 [ "$backup_failed" = false ]
 
-compose up -d api language-service compile-worker
+compose start api language-service compile-worker
 stopped=false
 
 compose images --format json >"$stage_dir/images.json"

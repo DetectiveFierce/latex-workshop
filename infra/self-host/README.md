@@ -37,6 +37,10 @@ Daily backups use `backup.sh` and default to the active synced directory
 `/home/mind-palace/data/landing-zone/Backups/latex-workshop`; set `LATEX_WORKSHOP_BACKUP_ROOT` to override
 it. Backup staging and archives use private permissions. Existing archives at the older
 `/home/mind-palace/docker/syncthing/data/landing_zone/Backups/latex-workshop` remain available.
+The script pauses writers with `compose stop` and resumes the same containers with `compose start`;
+it must never `up` them, because that would replace the images the central pipeline activated. In the
+Mind Palace workspace the cron job runs the pipeline-installed copy at `bin/backup.sh`, not a release's
+copy, so a change here reaches production through the parent `./deploy apply`.
 
 Local recovery regression checks:
 
