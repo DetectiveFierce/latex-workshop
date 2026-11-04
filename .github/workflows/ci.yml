@@ -46,6 +46,8 @@ jobs:
       - run: docker compose up -d --build
       - name: Wait for application
         run: timeout 240 sh -c 'until curl -fsS http://localhost:3001/health/ready && curl -fsS http://localhost:5173; do sleep 3; done'
+      # The specs import runtime schemas from this package.
+      - run: pnpm --filter @latex-workshop/contracts build
       - run: pnpm test:e2e
       - if: always()
         run: docker compose logs --no-color > docker-compose.log
@@ -57,3 +59,42 @@ jobs:
             docker-compose.log
             playwright-report
             test-results
+
+  promote:
+    name: Request production deploy
+    needs: [quality, e2e]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    steps:
+      # The workspace repository deploys whatever commit it points at.
+      - name: Point the workspace at this commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          WORKSPACE_PUSH_TOKEN: ${{ secrets.WORKSPACE_PUSH_TOKEN }}
+          SUBMODULE: latex-workshop
+        run: |
+          if [ -z "$WORKSPACE_PUSH_TOKEN" ]; then
+            echo "::notice::WORKSPACE_PUSH_TOKEN is not set; not requesting a deploy."
+            exit 0
+          fi
+          git clone --quiet --depth 1 "https://x-access-token:${WORKSPACE_PUSH_TOKEN}@github.com/DetectiveFierce/mind-palace.git" workspace
+          cd workspace
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          for attempt in 1 2 3 4 5; do
+            git fetch --quiet --depth 1 origin main
+            git reset --quiet --hard FETCH_HEAD
+            current="$(git rev-parse "HEAD:$SUBMODULE")"
+            # A slower run for an older commit must not move production backwards.
+            status="$(gh api "repos/$GITHUB_REPOSITORY/compare/$current...$GITHUB_SHA" --jq .status)"
+            if [ "$status" != "ahead" ]; then
+              echo "Workspace already has this commit or a newer one ($status)."
+              exit 0
+            fi
+            git update-index --cacheinfo "160000,$GITHUB_SHA,$SUBMODULE"
+            git commit --quiet -m "Point workspace at $SUBMODULE ${GITHUB_SHA::7}"
+            git push --quiet origin HEAD:main && exit 0
+            sleep "$((attempt * 5))"
+          done
+          echo "::error::Could not update the workspace pointer."
+          exit 1
