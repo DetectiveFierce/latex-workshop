@@ -82,7 +82,8 @@ services:
     logging: *default-logging
 
   minio:
-    image: quay.io/minio/minio:latest@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
+    # Built by the deployment pipeline as workshop-minio; see infra/minio/Dockerfile.
+    image: pgsty/minio:latest@sha256:b6bfe7239bfc83fb90d31612d9704d86039dd714f7904b3f1ad68f211e602372
     command: [server, /data, --console-address, ':9001']
     restart: unless-stopped
     environment:
@@ -104,7 +105,7 @@ services:
     logging: *default-logging
 
   minio-init:
-    image: minio/mc@sha256:eb4ea9884b77704230e2423e9004d2fa738dc272876b9cc41a297d29443b8780
+    image: pgsty/minio:latest@sha256:b6bfe7239bfc83fb90d31612d9704d86039dd714f7904b3f1ad68f211e602372
     restart: 'no'
     depends_on:
       minio:
@@ -380,7 +381,7 @@ services:
     logging: *default-logging
 
   minio-backup:
-    image: minio/mc@sha256:eb4ea9884b77704230e2423e9004d2fa738dc272876b9cc41a297d29443b8780
+    image: pgsty/minio:latest@sha256:b6bfe7239bfc83fb90d31612d9704d86039dd714f7904b3f1ad68f211e602372
     profiles: [tools]
     user: '${BACKUP_UID:-1000}:${BACKUP_GID:-1000}'
     environment:
