@@ -71,3 +71,18 @@ export function rewriteMcpResourceMetadataChallenge(
 export function publicWellKnownUrl(apiOrigin: string, rawUrl: string): URL {
   return new URL(rawUrl, new URL(apiOrigin).origin);
 }
+
+/**
+ * URL to enter when adding Workshop as a remote connector in a hosted agent (Claude, a ChatGPT
+ * custom app). Hosted agents call from their own cloud, so only the public OAuth resource works.
+ * A Secure MCP Tunnel resource is addressable solely through OpenAI's gateway and is not offered.
+ */
+export function remoteConnectorUrl(config: {
+  AGENT_MCP_ENABLED: boolean;
+  AGENT_MCP_RESOURCE_URL?: string | undefined;
+}): string | null {
+  if (!config.AGENT_MCP_ENABLED || !config.AGENT_MCP_RESOURCE_URL) return null;
+  const { hostname } = new URL(config.AGENT_MCP_RESOURCE_URL);
+  if (hostname === 'openai.org' || hostname.endsWith('.openai.org')) return null;
+  return config.AGENT_MCP_RESOURCE_URL;
+}

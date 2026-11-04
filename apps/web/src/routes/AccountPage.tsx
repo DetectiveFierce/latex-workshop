@@ -16,6 +16,7 @@ import {
   shortcutCategories,
   agentClientMetadataSchema,
   agentGrantsResponseSchema,
+  agentRemoteConnectorResponseSchema,
   shortcutRegistry,
   shortcutsConflict,
   type KeyboardKeymap,
@@ -295,19 +296,69 @@ function AgentAccessSettings({
   );
 }
 
+function CopyableUrl({ url, label }: { url: string; label: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <div className="agent-endpoint-row">
+      <code>{url}</code>
+      <Button
+        type="button"
+        aria-label={`Copy ${label}`}
+        onClick={async () => {
+          try {
+            await navigator.clipboard.writeText(url);
+            setCopied(true);
+            window.setTimeout(() => setCopied(false), 1_500);
+          } catch {
+            window.prompt(`Copy the ${label}:`, url);
+          }
+        }}
+      >
+        <Copy size={15} aria-hidden="true" /> {copied ? 'Copied' : 'Copy URL'}
+      </Button>
+    </div>
+  );
+}
+
 function AgentSetupCard() {
   const endpoint = new URL(appPath('/api/mcp'), window.location.origin).href;
-  const [copied, setCopied] = useState(false);
+  const remoteConnector = useQuery({
+    queryKey: ['agent-remote-connector'],
+    queryFn: async () =>
+      agentRemoteConnectorResponseSchema.parse(
+        await api<unknown>('/api/v1/agent-connections/remote-connector'),
+      ),
+  });
+  const remoteConnectorUrl = remoteConnector.data?.remoteConnectorUrl ?? null;
   return (
     <div className="agent-setup-card">
       <div>
-        <strong>Use LaTeX Workshop from ChatGPT or another agent</strong>
+        <strong>Use LaTeX Workshop from Claude, ChatGPT, or another agent</strong>
         <p className="hint">
-          In ChatGPT, install your workspace's LaTeX Workshop plugin and ask for the project by
-          name. The first request opens a one-time authorization where you choose which projects it
-          can access.
+          Ask for the project by name. The first request opens a one-time authorization where you
+          choose which projects that agent can access.
         </p>
       </div>
+      <div className="agent-chatgpt-row">
+        <a
+          className="button button-secondary"
+          href="https://claude.ai/customize/connectors"
+          target="_blank"
+          rel="noreferrer"
+        >
+          <ExternalLink size={15} aria-hidden="true" /> Open Claude Connectors
+        </a>
+        <span>
+          Add a custom connector with the URL below and leave the OAuth client fields blank.
+        </span>
+      </div>
+      {remoteConnectorUrl ? (
+        <CopyableUrl url={remoteConnectorUrl} label="remote connector URL" />
+      ) : remoteConnector.isSuccess ? (
+        <p className="hint">
+          Hosted agents need the public MCP gateway. Enable it on the server to show its URL here.
+        </p>
+      ) : null}
       <div className="agent-chatgpt-row">
         <a
           className="button button-secondary"
@@ -320,28 +371,13 @@ function AgentSetupCard() {
         <span>Already installed? Start a new chat and say “Edit my LaTeX Workshop project…”</span>
       </div>
       <p className="hint">
-        For Codex, Pi, Grok, or another MCP client, add this remote HTTP server directly:
+        For Claude Code, Codex, Pi, Grok, or another MCP client on this tailnet, add this remote
+        HTTP server directly:
       </p>
-      <div className="agent-endpoint-row">
-        <code>{endpoint}</code>
-        <Button
-          type="button"
-          onClick={async () => {
-            try {
-              await navigator.clipboard.writeText(endpoint);
-              setCopied(true);
-              window.setTimeout(() => setCopied(false), 1_500);
-            } catch {
-              window.prompt('Copy the MCP server URL:', endpoint);
-            }
-          }}
-        >
-          <Copy size={15} aria-hidden="true" /> {copied ? 'Copied' : 'Copy URL'}
-        </Button>
-      </div>
+      <CopyableUrl url={endpoint} label="MCP server URL" />
       <small>
-        Each ChatGPT account or device authorizes separately. Revoke access below at any time
-        without changing this URL or the server-managed guidance.
+        Each agent account or device authorizes separately. Revoke access below at any time without
+        changing these URLs or the server-managed guidance.
       </small>
     </div>
   );

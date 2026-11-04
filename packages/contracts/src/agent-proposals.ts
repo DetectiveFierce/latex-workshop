@@ -415,6 +415,10 @@ export const putAgentConnectionGrantSchema = putAgentGrantSchema.extend({
   clientId: z.string().min(1).max(4_096),
 });
 export const agentConnectionQuerySchema = z.object({ clientId: z.string().min(1).max(4_096) });
+export const agentRemoteConnectorResponseSchema = z.object({
+  remoteConnectorUrl: z.url().nullable(),
+});
+export type AgentRemoteConnectorResponse = z.infer<typeof agentRemoteConnectorResponseSchema>;
 
 export const agentProposalEventSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('proposal'), proposalId: idSchema, revision: z.number().int() }),

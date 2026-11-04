@@ -1,0 +1,14 @@
+{
+  "name": "mind-palace",
+  "owner": {
+    "name": "Aidan J. Wagner"
+  },
+  "plugins": [
+    {
+      "name": "latex-workshop",
+      "source": "./plugins/latex-workshop",
+      "description": "Private Mind Palace LaTeX Workshop projects over OAuth MCP.",
+      "category": "productivity"
+    }
+  ]
+}

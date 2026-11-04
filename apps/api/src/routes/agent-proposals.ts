@@ -4,6 +4,7 @@ import {
   agentConnectionQuerySchema,
   agentClientMetadataSchema,
   agentProposalFileQuerySchema,
+  agentRemoteConnectorResponseSchema,
   proposalBulkDecisionSchema,
   proposalDecisionSchema,
   putAgentConnectionGrantSchema,
@@ -26,6 +27,7 @@ import type { AppContext } from '../lib/context.js';
 import { requireUser } from '../lib/context.js';
 import { badRequest, notFound } from '../lib/errors.js';
 import { requireProject } from '../lib/domain.js';
+import { remoteConnectorUrl } from '../lib/public-request-url.js';
 import {
   acceptRemainingProposalItems,
   decideProposalItem,
@@ -41,6 +43,12 @@ import {
 } from '../lib/agent-proposals.js';
 
 export async function registerAgentProposalRoutes(app: FastifyInstance, context: AppContext) {
+  app.get('/api/v1/agent-connections/remote-connector', async (request) => {
+    await requireUser(context, request);
+    return agentRemoteConnectorResponseSchema.parse({
+      remoteConnectorUrl: remoteConnectorUrl(context.config),
+    });
+  });
   app.get('/api/v1/agent-connections/client', async (request) => {
     await requireUser(context, request);
     const { clientId } = agentConnectionQuerySchema.parse(request.query);

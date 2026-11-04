@@ -12,6 +12,7 @@ import {
   rewriteMcpResourceMetadataChallenge,
   publicRequestUrl,
   publicWellKnownUrl,
+  remoteConnectorUrl,
 } from './public-request-url.js';
 
 describe('publicRequestUrl', () => {
@@ -170,5 +171,32 @@ describe('publicWellKnownUrl', () => {
         '/.well-known/oauth-protected-resource/latex-workshop/api/mcp',
       ).toString(),
     ).toBe('https://mind-palace/.well-known/oauth-protected-resource/latex-workshop/api/mcp');
+  });
+});
+
+describe('remoteConnectorUrl', () => {
+  const gateway = 'https://workshop-mcp.tail7e24aa.ts.net/latex-workshop/api/mcp';
+
+  it('offers the public OAuth resource to hosted connectors', () => {
+    expect(remoteConnectorUrl({ AGENT_MCP_ENABLED: true, AGENT_MCP_RESOURCE_URL: gateway })).toBe(
+      gateway,
+    );
+  });
+
+  it('withholds the URL when agent access is disabled or unset', () => {
+    expect(remoteConnectorUrl({ AGENT_MCP_ENABLED: false, AGENT_MCP_RESOURCE_URL: gateway })).toBe(
+      null,
+    );
+    expect(remoteConnectorUrl({ AGENT_MCP_ENABLED: true })).toBe(null);
+  });
+
+  it('never offers an OpenAI Secure MCP Tunnel resource, which only OpenAI can reach', () => {
+    expect(
+      remoteConnectorUrl({
+        AGENT_MCP_ENABLED: true,
+        AGENT_MCP_RESOURCE_URL:
+          'https://tunnel-service.gateway.unified-0.internal.api.openai.org/v1/mcp/tunnel_0123456789abcdef0123456789abcdef',
+      }),
+    ).toBe(null);
   });
 });

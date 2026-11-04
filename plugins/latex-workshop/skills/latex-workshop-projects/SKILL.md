@@ -40,4 +40,4 @@ Library folder operations refer to top-level document projects, while `propose_s
 
 For optional proposals, `needs_rebase` means reread conflicts, rewrite against current hashes, and finish again. Never route a normal live edit through owner proposal approval.
 
-If the connected tools are unavailable, tell the user to install or enable the workspace LaTeX Workshop plugin in ChatGPT and authorize projects under **Mind Palace → Account settings → Agent access**. Describe this as a missing app connection, not a filesystem limitation.
+If the connected tools are unavailable, tell the user to connect LaTeX Workshop in their agent — a custom connector in Claude (**Customize → Connectors**, using the remote connector URL from Account settings), the workspace plugin in ChatGPT, or the remote MCP URL in another client — and authorize projects under **Mind Palace → Account settings → Agent access**. Describe this as a missing app connection, not a filesystem limitation.

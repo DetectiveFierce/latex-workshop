@@ -53,7 +53,9 @@ Owner-only Tailscale devices and the private ChatGPT tunnel can instead authenti
 through [private agent ingress](docs/self-hosting.md#automatic-private-agent-authentication), with
 separate revocable service connections and no recurring Workshop OAuth login.
 
-For ChatGPT on the web, register the production endpoint as a custom OAuth MCP app using
+For Claude (web, desktop, mobile, and Claude Code), add the public MCP gateway as a custom
+connector using [the Claude connector guide](docs/claude.md). For ChatGPT on the web, register the
+production endpoint as a custom OAuth MCP app using
 [the ChatGPT web rollout](docs/chatgpt-web.md). The portable repository plugin bundles the same
 workflow and a direct OAuth MCP declaration for Work and Codex. Its server URL is deployment
 metadata; no placeholder app registration is required in the source package.
