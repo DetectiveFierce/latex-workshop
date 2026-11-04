@@ -24,6 +24,7 @@ import {
 } from '@latex-workshop/db';
 import { ObjectStorage } from '@latex-workshop/storage';
 import { LspFrameDecoder, LspFrameError } from './lsp-framing.js';
+import { endSessionOnServerFailure } from './server-process.js';
 import {
   applyLspContentChanges,
   LatexNavigationIndex,
@@ -159,6 +160,12 @@ async function bridgeTexLab(socket: WebSocket, projectId: string) {
       stdio: ['pipe', 'pipe', 'pipe'],
       env: { PATH: process.env.PATH ?? '/usr/bin', HOME: workspace },
     });
+    const endSession = () => {
+      console.error(`[texlab:${projectId}] language server failed`);
+      processHandle?.kill('SIGKILL');
+      if (socket.readyState === socket.OPEN) socket.close(1011, 'Language server stopped');
+    };
+    endSessionOnServerFailure(processHandle, processHandle.stdin, endSession);
     const serverRoot = pathToFileURL(workspace).href.replace(/\/$/, '');
     const decoder = new LspFrameDecoder();
     forwardMessage = (message: string) => {
